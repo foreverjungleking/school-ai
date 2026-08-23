@@ -43,7 +43,8 @@ and explains [private networking](https://docs.railway.com/networking/private-ne
 - Build: Railpack automatic Python dependency installation; leave the dashboard
   Build Command empty
 - Pre-deploy: `alembic upgrade head`
-- Start: `uvicorn school_ai.api.app:app --host 0.0.0.0 --port $PORT`
+- Start:
+  `uvicorn school_ai.api.app:app --app-dir src --host 0.0.0.0 --port $PORT`
 - Health path: `/health`
 
 Set:

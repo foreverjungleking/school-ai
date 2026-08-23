@@ -5,14 +5,14 @@
     "buildCommand": "python -m pip install .",
     "watchPatterns": [
       "/src/**",
-      "/alembic/**",
+      "/migrations/**",
       "/alembic.ini",
       "/pyproject.toml",
       "/railway.json"
     ]
   },
   "deploy": {
-    "preDeployCommand": ["python -c \"from alembic.config import main; main(argv=['upgrade', 'head'])\""],
+    "preDeployCommand": ["alembic upgrade head"],
     "startCommand": "uvicorn school_ai.api.app:app --host 0.0.0.0 --port $PORT",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 120,

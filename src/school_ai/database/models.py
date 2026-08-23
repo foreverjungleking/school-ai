@@ -185,6 +185,9 @@ class ScheduleVersion(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     solver_status: Mapped[str] = mapped_column(String(20), nullable=False)
     solve_duration_seconds: Mapped[float] = mapped_column(nullable=False)
     solver_metadata: Mapped[dict[str, Any]] = mapped_column(

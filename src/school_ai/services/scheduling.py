@@ -1,6 +1,7 @@
 """Schedule lifecycle orchestration across repositories and the CP-SAT engine."""
 
 from collections.abc import Callable, Sequence
+from datetime import datetime, timezone
 
 from school_ai.database.models import (
     RoomAvailability,
@@ -126,6 +127,7 @@ def _version_view(version: ScheduleVersion) -> ScheduleVersionView:
         version_number=version.version_number,
         status=version.status,
         created_at=version.created_at,
+        published_at=version.published_at,
         solver_status=SolveStatus(version.solver_status),
         solve_duration_seconds=version.solve_duration_seconds,
         solver_metadata=dict(version.solver_metadata),
@@ -198,10 +200,32 @@ class SchedulingService:
 
     def get_schedule(self, schedule_id: int) -> ScheduleSummary:
         schedule = self._require_schedule(schedule_id)
-        return ScheduleSummary(id=schedule.id, name=schedule.name)
+        draft = self._schedules.get_latest_draft(schedule_id)
+        published = self._schedules.get_published(schedule_id)
+        return ScheduleSummary(
+            id=schedule.id,
+            name=schedule.name,
+            latest_draft_version_id=draft.id if draft else None,
+            published_version_id=published.id if published else None,
+        )
 
-    def get_schedule_version(self, version_id: int) -> ScheduleVersionView:
-        return _version_view(self._require_version(version_id))
+    def get_schedule_version(
+        self, version_id: int, schedule_id: int | None = None
+    ) -> ScheduleVersionView:
+        version = self._require_version(version_id)
+        self._validate_version_schedule(version, schedule_id)
+        return _version_view(version)
+
+    def get_published_schedule_version(
+        self, schedule_id: int
+    ) -> ScheduleVersionView:
+        self._require_schedule(schedule_id)
+        version = self._schedules.get_published(schedule_id)
+        if version is None:
+            raise ScheduleVersionNotFoundError(
+                f"schedule {schedule_id} has no published version"
+            )
+        return _version_view(version)
 
     def list_schedule_versions(
         self, schedule_id: int
@@ -211,8 +235,11 @@ class SchedulingService:
             _version_view(item) for item in self._schedules.list_versions(schedule_id)
         )
 
-    def publish_schedule_version(self, version_id: int) -> ScheduleVersionView:
+    def publish_schedule_version(
+        self, version_id: int, schedule_id: int | None = None
+    ) -> ScheduleVersionView:
         version = self._require_version(version_id)
+        self._validate_version_schedule(version, schedule_id)
         if version.status != ScheduleVersionStatus.DRAFT:
             raise InvalidScheduleTransitionError(
                 "only a draft schedule version can be published"
@@ -223,6 +250,7 @@ class SchedulingService:
                 published.status = ScheduleVersionStatus.SUPERSEDED
                 self._schedules.flush()
             version.status = ScheduleVersionStatus.PUBLISHED
+            version.published_at = datetime.now(timezone.utc)
             self._schedules.commit()
         except Exception:
             self._schedules.rollback()
@@ -230,10 +258,15 @@ class SchedulingService:
         return _version_view(version)
 
     def compare_schedule_versions(
-        self, from_version_id: int, to_version_id: int
+        self,
+        from_version_id: int,
+        to_version_id: int,
+        schedule_id: int | None = None,
     ) -> ScheduleVersionComparison:
         before = self._require_version(from_version_id)
         after = self._require_version(to_version_id)
+        self._validate_version_schedule(before, schedule_id)
+        self._validate_version_schedule(after, schedule_id)
         if before.schedule_id != after.schedule_id:
             raise ValueError("schedule versions must belong to the same schedule")
 
@@ -282,6 +315,15 @@ class SchedulingService:
                 f"schedule version {version_id} not found"
             )
         return version
+
+    @staticmethod
+    def _validate_version_schedule(
+        version: ScheduleVersion, schedule_id: int | None
+    ) -> None:
+        if schedule_id is not None and version.schedule_id != schedule_id:
+            raise ScheduleVersionNotFoundError(
+                f"schedule version {version.id} not found for schedule {schedule_id}"
+            )
 
     @staticmethod
     def _same_assignment(

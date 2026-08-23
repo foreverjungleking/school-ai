@@ -16,6 +16,8 @@ class ServiceModel(BaseModel):
 class ScheduleSummary(ServiceModel):
     id: int
     name: str
+    latest_draft_version_id: int | None = None
+    published_version_id: int | None = None
 
 
 class ScheduledLessonView(ServiceModel):
@@ -38,6 +40,7 @@ class ScheduleVersionView(ServiceModel):
     version_number: int
     status: ScheduleVersionStatus
     created_at: datetime
+    published_at: datetime | None
     solver_status: SolveStatus
     solve_duration_seconds: float
     solver_metadata: dict[str, Any]

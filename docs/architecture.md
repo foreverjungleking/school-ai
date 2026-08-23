@@ -3,12 +3,15 @@
 ## Core Application
 
 ```text
-Browser / Future UI
+       Browser
         |
         v
-     FastAPI ---------+
+      Demo UI
+        |
+        v
+     FastAPI ----------+
                        |
-Future MCP Server -----+--> Application Services
+Future MCP Server ------+--> Application Services
                               /          \
                              v            v
                        Repositories    Scheduler interface
@@ -32,6 +35,18 @@ queries also pass through a dedicated application service. Database sessions
 are request-scoped dependencies, while schedule generation and publication
 transactions remain owned by the scheduling application service. Future MCP
 tools will use these same services in parallel with FastAPI.
+
+The demo UI is a separately built React/TypeScript application. Its typed API
+client is the only browser-side capability boundary: components do not query
+PostgreSQL, construct solver models, or reproduce schedule lifecycle and version
+comparison rules. FastAPI remains responsible for public validation and HTTP
+mapping, while application services remain responsible for scheduling,
+persistence transactions, publication, and comparison.
+
+The browser prepares a standard weekday/hour candidate-slot template for the
+existing draft-generation endpoint. CP-SAT remains authoritative about whether
+those inputs produce a valid timetable. `INFEASIBLE` and `UNKNOWN` responses are
+shown as failures and never rendered as timetable data.
 
 API configuration is loaded from environment variables. The application factory
 owns the configured database engine/session factory and closes the engine during
@@ -120,3 +135,7 @@ added, removed, and changed assignments for future presentation layers.
 No migration framework is currently configured. Schema creation follows the
 existing `Base.metadata.create_all()` approach; production migrations are still
 required before deployment.
+
+The idempotent `school_ai.demo_seed` utility adds deterministic synthetic school
+resources only to an empty database. It is an infrastructure/demo helper outside
+the solver and service business logic and refuses partially populated datasets.

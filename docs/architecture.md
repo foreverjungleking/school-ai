@@ -46,3 +46,12 @@ The School MCP Server will expose application capabilities to AI agents. Its ada
 - `src/school_ai/database/` contains persistence-related components.
 - `src/school_ai/services/` contains application services.
 - `src/school_ai/solver/` contains scheduling and optimization components.
+
+## Scheduling Engine
+
+The solver accepts validated, in-memory DTOs and has no dependency on database
+sessions or web frameworks. Candidate assignments are represented by optional
+fixed CP-SAT intervals. Required sessions select exactly one candidate, and
+teacher, student-group, and room calendars each use hard `NoOverlap`
+constraints. Availability and room suitability are enforced when candidates
+are created; constraints are never relaxed to obtain a result.

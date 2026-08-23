@@ -41,7 +41,8 @@ and explains [private networking](https://docs.railway.com/networking/private-ne
 - Root directory: `/`
 - Config file, only for an existing Config as Code service: `/railway.json`
 - Build: `python -m pip install .`
-- Pre-deploy: `python -m alembic upgrade head`
+- Pre-deploy:
+  `python -c "from alembic.config import main; main(argv=['upgrade', 'head'])"`
 - Start: `uvicorn school_ai.api.app:app --host 0.0.0.0 --port $PORT`
 - Health path: `/health`
 
@@ -66,12 +67,13 @@ describes deployment readiness; `/health` intentionally does not query the DB.
 
 ### Schema and synthetic data
 
-The pre-deploy command runs `python -m alembic upgrade head`. Using the active
-Python interpreter avoids relying on the console-script directory being present
-on Railway's pre-deploy `PATH`. Alembic is a normal production dependency in
-`pyproject.toml`, so `python -m pip install .` installs it. The command upgrades
-in place, never calls `drop_all()`, and is repeatable. After its first success,
-use a one-off
+The pre-deploy command runs
+`python -c "from alembic.config import main; main(argv=['upgrade', 'head'])"`.
+Calling Alembic's supported Python entry point avoids relying on either a
+console-script directory in Railway's `PATH` or a nonexistent `alembic.__main__`
+module. Alembic is a normal production dependency in `pyproject.toml`, so
+`python -m pip install .` installs it. The command upgrades in place, never
+calls `drop_all()`, and is repeatable. After its first success, use a one-off
 Railway SSH command in the deployed backend container to seed explicitly. Link
 the Railway CLI to the project/environment, or copy the Backend service's exact
 SSH command from the dashboard, then run:

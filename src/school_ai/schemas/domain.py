@@ -38,8 +38,8 @@ class StudentGroupRead(StudentGroupCreate, ORMModel):
 
 class ActivityCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
-    student_group_id: int
-    teacher_id: int
+    student_group_id: int = Field(gt=0)
+    teacher_id: int = Field(gt=0)
     sessions_per_week: int = Field(gt=0)
     duration_minutes: int = Field(gt=0)
     required_room_type: str = Field(min_length=1, max_length=100)
@@ -49,19 +49,30 @@ class ActivityRead(ActivityCreate, ORMModel):
     id: int
 
 
-class TeacherAvailabilityCreate(BaseModel):
-    teacher_id: int
+class AvailabilityBase(BaseModel):
     weekday: int = Field(ge=0, le=6)
     start_time: time
     end_time: time
     available: bool = True
 
     @model_validator(mode="after")
-    def validate_time_range(self) -> "TeacherAvailabilityCreate":
+    def validate_time_range(self) -> "AvailabilityBase":
         if self.start_time >= self.end_time:
             raise ValueError("start_time must be before end_time")
         return self
 
 
+class TeacherAvailabilityCreate(AvailabilityBase):
+    teacher_id: int = Field(gt=0)
+
+
 class TeacherAvailabilityRead(TeacherAvailabilityCreate, ORMModel):
+    id: int
+
+
+class RoomAvailabilityCreate(AvailabilityBase):
+    room_id: int = Field(gt=0)
+
+
+class RoomAvailabilityRead(RoomAvailabilityCreate, ORMModel):
     id: int

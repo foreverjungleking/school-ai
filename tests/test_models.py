@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from school_ai.database.models import (
     Activity,
     Room,
+    RoomAvailability,
     StudentGroup,
     Teacher,
     TeacherAvailability,
@@ -15,6 +16,7 @@ from school_ai.database.models import (
 def test_all_domain_tables_are_created(session: Session) -> None:
     assert set(inspect(session.bind).get_table_names()) == {
         "activities",
+        "room_availability",
         "rooms",
         "student_groups",
         "teacher_availability",
@@ -57,6 +59,39 @@ def test_availability_defaults_to_available(session: Session) -> None:
     slot = TeacherAvailability(
         teacher=teacher,
         weekday=2,
+        start_time=time(9, 0),
+        end_time=time(12, 0),
+    )
+    session.add(slot)
+    session.commit()
+
+    assert slot.available is True
+
+
+def test_room_availability_persists_with_room_relationship(session: Session) -> None:
+    room = Room(name="Sports Hall", capacity=120, room_type="sports")
+    slot = RoomAvailability(
+        room=room,
+        weekday=1,
+        start_time=time(8, 30),
+        end_time=time(17, 0),
+    )
+    session.add(slot)
+    session.commit()
+
+    stored = session.scalar(
+        select(RoomAvailability).where(RoomAvailability.room_id == room.id)
+    )
+
+    assert stored is not None
+    assert stored.room is room
+    assert room.availability == [stored]
+
+
+def test_room_availability_defaults_to_available(session: Session) -> None:
+    slot = RoomAvailability(
+        room=Room(name="Music Room", capacity=30, room_type="music"),
+        weekday=4,
         start_time=time(9, 0),
         end_time=time(12, 0),
     )

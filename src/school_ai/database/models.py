@@ -31,6 +31,10 @@ class Room(Base):
     capacity: Mapped[int] = mapped_column(nullable=False)
     room_type: Mapped[str] = mapped_column(String(100), nullable=False)
 
+    availability: Mapped[list[RoomAvailability]] = relationship(
+        back_populates="room", cascade="all, delete-orphan"
+    )
+
 
 class StudentGroup(Base):
     __tablename__ = "student_groups"
@@ -87,3 +91,26 @@ class TeacherAvailability(Base):
     available: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     teacher: Mapped[Teacher] = relationship(back_populates="availability")
+
+
+class RoomAvailability(Base):
+    __tablename__ = "room_availability"
+    __table_args__ = (
+        CheckConstraint(
+            "weekday >= 0 AND weekday <= 6", name="ck_room_availability_weekday"
+        ),
+        CheckConstraint(
+            "start_time < end_time", name="ck_room_availability_time_range"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    room_id: Mapped[int] = mapped_column(
+        ForeignKey("rooms.id"), nullable=False, index=True
+    )
+    weekday: Mapped[int] = mapped_column(nullable=False)
+    start_time: Mapped[time] = mapped_column(Time, nullable=False)
+    end_time: Mapped[time] = mapped_column(Time, nullable=False)
+    available: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    room: Mapped[Room] = relationship(back_populates="availability")

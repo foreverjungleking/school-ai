@@ -42,6 +42,8 @@ class TimeSlot(SolverModel):
 
 
 class TeacherInput(SolverModel):
+    """Teacher resources; an empty availability tuple means unrestricted."""
+
     id: int = Field(gt=0)
     availability: tuple[AvailabilityWindow, ...] = ()
 
@@ -52,9 +54,11 @@ class StudentGroupInput(SolverModel):
 
 
 class RoomInput(SolverModel):
+    """Room resources; an empty availability tuple means unrestricted."""
+
     id: int = Field(gt=0)
     capacity: int = Field(gt=0)
-    room_type: str = Field(min_length=1)
+    room_type: str = Field(min_length=1, max_length=100)
     availability: tuple[AvailabilityWindow, ...] = ()
 
 
@@ -64,16 +68,16 @@ class ActivityInput(SolverModel):
     student_group_id: int = Field(gt=0)
     sessions_per_week: int = Field(gt=0)
     duration_minutes: int = Field(gt=0)
-    required_room_type: str | None = Field(default=None, min_length=1)
+    required_room_type: str = Field(min_length=1, max_length=100)
 
 
 class SchedulingProblem(SolverModel):
-    teachers: tuple[TeacherInput, ...]
-    student_groups: tuple[StudentGroupInput, ...]
-    rooms: tuple[RoomInput, ...]
-    activities: tuple[ActivityInput, ...]
-    time_slots: tuple[TimeSlot, ...]
-    max_solve_seconds: float = Field(default=10.0, gt=0)
+    teachers: tuple[TeacherInput, ...] = Field(min_length=1)
+    student_groups: tuple[StudentGroupInput, ...] = Field(min_length=1)
+    rooms: tuple[RoomInput, ...] = Field(min_length=1)
+    activities: tuple[ActivityInput, ...] = Field(min_length=1)
+    time_slots: tuple[TimeSlot, ...] = Field(min_length=1)
+    max_solve_seconds: float = Field(default=10.0, gt=0, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def validate_references_and_identifiers(self) -> "SchedulingProblem":
@@ -123,6 +127,13 @@ class Assignment(SolverModel):
 class SolverResult(SolverModel):
     status: SolveStatus
     assignments: tuple[Assignment, ...] = ()
-    solve_duration_seconds: float = Field(ge=0)
-    objective_value: float | None = None
+    solve_duration_seconds: float = Field(ge=0, allow_inf_nan=False)
+    objective_value: float | None = Field(default=None, allow_inf_nan=False)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_assignments_for_status(self) -> "SolverResult":
+        if self.status in (SolveStatus.INFEASIBLE, SolveStatus.UNKNOWN):
+            if self.assignments:
+                raise ValueError(f"{self.status} result cannot contain assignments")
+        return self

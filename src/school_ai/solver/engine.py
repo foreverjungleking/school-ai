@@ -43,6 +43,8 @@ def _allowed_by_availability(
     start_minute: int,
     end_minute: int,
 ) -> bool:
+    """Apply global whitelist semantics with same-day blackouts taking priority."""
+
     same_day = [window for window in windows if window.weekday == weekday]
     unavailable = [window for window in same_day if not window.available]
     if any(
@@ -93,10 +95,7 @@ def solve(problem: SchedulingProblem) -> SolverResult:
                 for room in problem.rooms:
                     if room.capacity < group.size:
                         continue
-                    if (
-                        activity.required_room_type is not None
-                        and room.room_type != activity.required_room_type
-                    ):
+                    if room.room_type != activity.required_room_type:
                         continue
                     if not _allowed_by_availability(
                         room.availability, slot.weekday, start_minute, end_minute

@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
+import math
 
 from school_ai.database.models import (
     RoomAvailability,
@@ -141,10 +142,14 @@ class SchedulingService:
         schedule_repository: ScheduleRepository,
         data_repository: SchedulingDataRepository,
         solver: Solver = solve,
+        max_solve_seconds: float = 30.0,
     ) -> None:
+        if not math.isfinite(max_solve_seconds) or max_solve_seconds <= 0:
+            raise ValueError("max_solve_seconds must be a positive finite number")
         self._schedules = schedule_repository
         self._data = data_repository
         self._solver = solver
+        self._max_solve_seconds = max_solve_seconds
 
     def create_schedule(self, name: str) -> ScheduleSummary:
         if not name.strip():
@@ -165,7 +170,9 @@ class SchedulingService:
     ) -> GenerateScheduleResult:
         schedule = self._require_schedule(schedule_id)
         data = self._data.load()
-        problem = build_scheduling_problem(data, time_slots, max_solve_seconds)
+        problem = build_scheduling_problem(
+            data, time_slots, min(max_solve_seconds, self._max_solve_seconds)
+        )
         result = self._solver(problem)
         if result.status not in (SolveStatus.FEASIBLE, SolveStatus.OPTIMAL):
             return GenerateScheduleResult(

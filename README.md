@@ -34,9 +34,9 @@ it `PUBLISHED` and marks the prior published version `SUPERSEDED`, ensuring at
 most one current publication per schedule. Further changes require generating a
 new draft rather than modifying a published lesson snapshot in place.
 
-The project does not yet use a migration framework. Tests and current database
-initialization use SQLAlchemy's `Base.metadata.create_all()`; production schema
-migrations remain a future infrastructure milestone.
+Database schema changes are managed with Alembic. Apply the current schema with
+`alembic upgrade head`; application startup and demo seeding never drop tables
+or silently rebuild the production database.
 
 ## Run the API locally
 
@@ -48,11 +48,11 @@ python3.12 -m venv .venv
 .venv/bin/python -m pip install -e '.[dev]'
 ```
 
-Configure a PostgreSQL database whose tables have been initialized from the
-current SQLAlchemy metadata, then start the ASGI application:
+Configure PostgreSQL, apply migrations, then start the ASGI application:
 
 ```bash
 export DATABASE_URL='postgresql+psycopg://postgres:postgres@localhost:5432/school_ai'
+.venv/bin/alembic upgrade head
 .venv/bin/uvicorn school_ai.api.app:app --reload
 ```
 
@@ -71,6 +71,8 @@ Environment configuration:
 - `ALLOWED_CORS_ORIGINS`: comma-separated origins. Localhost ports 3000 and
   5173 are allowed by default for development; production origins must be set
   explicitly.
+- `MAX_SOLVE_SECONDS`: application-enforced upper bound for each CP-SAT request;
+  defaults to 15 seconds.
 
 A basic scheduling workflow is:
 
@@ -82,8 +84,7 @@ A basic scheduling workflow is:
 5. Explicitly publish a draft with
    `POST /schedules/{id}/versions/{version_id}/publish`.
 
-The API does not automatically create or migrate production tables. A migration
-system and deployment workflow remain separate future milestones.
+The API does not automatically create or migrate tables during startup.
 
 ## Run the public demo UI locally
 
@@ -96,6 +97,7 @@ backend:
 
 ```bash
 export DATABASE_URL='postgresql+psycopg://postgres:postgres@localhost:5432/school_ai'
+.venv/bin/alembic upgrade head
 .venv/bin/python -m school_ai.demo_seed
 .venv/bin/uvicorn school_ai.api.app:app --reload
 ```
@@ -132,3 +134,10 @@ cd frontend
 npm test
 npm run build
 ```
+
+## Railway deployment
+
+The repository includes Railway configuration for a root FastAPI service and a
+`frontend/` static service. PostgreSQL migrations, deterministic one-time demo
+seeding, environment variables, custom-domain setup, and the production smoke
+test are documented in [docs/deployment-railway.md](docs/deployment-railway.md).

@@ -6,7 +6,6 @@ from datetime import time
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from school_ai.database.base import Base
 from school_ai.database.models import (
     Activity,
     Room,
@@ -110,7 +109,6 @@ def _counts(session: Session) -> tuple[int, int, int, int]:
 
 def main() -> None:
     engine = create_database_engine(get_database_url())
-    Base.metadata.create_all(engine)
     with Session(engine) as session:
         result = seed_demo_data(session)
     engine.dispose()

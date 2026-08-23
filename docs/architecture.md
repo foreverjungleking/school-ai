@@ -3,20 +3,25 @@
 ## Core Application
 
 ```text
-User
-  |
-  v
-FastAPI / UI
-  |
-  v
-Application Services
-  |
-  +------ PostgreSQL
-  |
-  +------ CP-SAT Scheduler
+Future API / MCP / UI
+          |
+          v
+  Application Services
+       /          \
+      v            v
+Repositories    Scheduler interface
+      |            |
+      v            v
+ PostgreSQL    CP-SAT engine
 ```
 
-Application services coordinate the system. PostgreSQL is the source of truth for application state, while the OR-Tools CP-SAT scheduler is the authoritative scheduling engine.
+Application services own orchestration and transaction boundaries. Repositories
+contain SQLAlchemy queries and persistence operations but no scheduling logic.
+The scheduler interface accepts and returns in-memory DTOs and contains no
+database logic. PostgreSQL is the source of truth for application state, while
+the OR-Tools CP-SAT scheduler is the authoritative scheduling engine. Future
+API, MCP, and UI adapters must call application services rather than database or
+solver internals.
 
 ## Planned AI Integration
 
@@ -74,3 +79,29 @@ Scheduling problems must contain at least one teacher, student group, room,
 activity, and time slot. Identifiers must be unique within each collection, and
 activities must reference a teacher and student group in the problem. These
 requirements align the solver boundary with the existing domain model.
+
+## Schedule Persistence
+
+`Schedule` provides a logical timetable identity. Each valid solver result is
+stored as a new `ScheduleVersion` with a monotonically increasing version number
+and a complete set of `ScheduledLesson` assignment snapshots. Candidate time
+slots are supplied to the application service; teachers, groups, rooms,
+activities, and availability are loaded through the scheduling-data repository
+and translated into `SchedulingProblem` DTOs before CP-SAT is invoked.
+
+New solver results are always `DRAFT`. Publication is an explicit application
+service transition, never an in-place edit of a published lesson snapshot. When
+a new draft is published, the previous `PUBLISHED` version becomes
+`SUPERSEDED`. Service logic and a database partial unique index enforce at most
+one currently published version per schedule. `INFEASIBLE`, `UNKNOWN`, and
+assignment-free outcomes return solver diagnostics without persisting a version
+or lessons.
+
+The schedule repository provides focused schedule/version queries and writes;
+it does not implement constraints or call CP-SAT. Version comparison is
+application logic keyed by `(activity_id, session_index)` and reports unchanged,
+added, removed, and changed assignments for future presentation layers.
+
+No migration framework is currently configured. Schema creation follows the
+existing `Base.metadata.create_all()` approach; production migrations are still
+required before deployment.

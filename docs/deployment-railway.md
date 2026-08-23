@@ -40,7 +40,8 @@ and explains [private networking](https://docs.railway.com/networking/private-ne
 - Source: GitHub repository `foreverjungleking/school-ai`, branch `main`
 - Root directory: `/`
 - Config file, only for an existing Config as Code service: `/railway.json`
-- Build: `python -m pip install .`
+- Build: Railpack automatic Python dependency installation; leave the dashboard
+  Build Command empty
 - Pre-deploy: `alembic upgrade head`
 - Start: `uvicorn school_ai.api.app:app --host 0.0.0.0 --port $PORT`
 - Health path: `/health`
@@ -66,13 +67,17 @@ describes deployment readiness; `/health` intentionally does not query the DB.
 
 ### Schema and synthetic data
 
-The pre-deploy command runs `alembic upgrade head`. Alembic is a normal
-production dependency in `pyproject.toml`, so `python -m pip install .` installs
-the real package and its console script. Migration scripts live in
-`migrations/`, avoiding a top-level Python namespace named `alembic` that could
-shadow the installed package when installation is missing or misconfigured.
-The command upgrades in place, never calls `drop_all()`, and is repeatable.
-After its first success, use a one-off
+Railpack detects root `requirements.txt`, whose sole entry (`.`) installs the
+current PEP 621 project through Railpack's normal Python dependency phase.
+`pyproject.toml` remains authoritative for dependencies, including production
+Alembic. Do not configure a custom Backend Build Command. In particular, clear
+any existing dashboard override containing `python -m pip install .`; otherwise
+it supersedes this corrected build behavior.
+
+The pre-deploy command remains `alembic upgrade head`. Migration scripts live
+in `migrations/`, so there is no top-level Python namespace named `alembic` to
+shadow the installed package. The command upgrades in place, never calls
+`drop_all()`, and is repeatable. After its first success, use a one-off
 Railway SSH command in the deployed backend container to seed explicitly. Link
 the Railway CLI to the project/environment, or copy the Backend service's exact
 SSH command from the dashboard, then run:
@@ -132,7 +137,8 @@ Follow Railway's current [custom-domain flow](https://docs.railway.com/networkin
 1. Confirm the canvas contains exactly `Postgres`, `Backend`, and `Frontend`.
 2. Keep Postgres private; do not enable its TCP proxy.
 3. Connect Backend to the GitHub repository's `main` branch. Enter its root,
-   build, pre-deploy, start, health, and variables exactly as listed above.
+   pre-deploy, start, health, and variables exactly as listed above. In Backend
+   Settings, clear any manual Build Command so Railpack uses `requirements.txt`.
 4. Deploy Backend. Confirm logs show Alembic reaching `head`; a failed
    pre-deploy prevents the new deployment from starting.
 5. Explicitly seed once with Railway SSH.

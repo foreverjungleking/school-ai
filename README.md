@@ -16,7 +16,9 @@ The current implementation provides:
   data into solver DTOs and persist successful results as versioned schedules
 - pytest coverage using an in-memory SQLite database
 
-API endpoints and AI integrations are planned but are not yet implemented.
+The FastAPI application exposes read-only school data and the complete schedule
+draft/version/publication workflow. AI and MCP integrations are planned but are
+not yet implemented.
 
 ## Schedule lifecycle
 
@@ -35,3 +37,50 @@ new draft rather than modifying a published lesson snapshot in place.
 The project does not yet use a migration framework. Tests and current database
 initialization use SQLAlchemy's `Base.metadata.create_all()`; production schema
 migrations remain a future infrastructure milestone.
+
+## Run the API locally
+
+Install the project and development dependencies in a Python 3.12 virtual
+environment:
+
+```bash
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -e '.[dev]'
+```
+
+Configure a PostgreSQL database whose tables have been initialized from the
+current SQLAlchemy metadata, then start the ASGI application:
+
+```bash
+export DATABASE_URL='postgresql+psycopg://postgres:postgres@localhost:5432/school_ai'
+.venv/bin/uvicorn school_ai.api.app:app --reload
+```
+
+Useful local URLs:
+
+- Health check: `http://127.0.0.1:8000/health`
+- Interactive API documentation: `http://127.0.0.1:8000/docs`
+- OpenAPI schema: `http://127.0.0.1:8000/openapi.json`
+
+Environment configuration:
+
+- `DATABASE_URL`: PostgreSQL connection URL. Defaults to the local development
+  database shown above.
+- `APP_NAME` and `APP_VERSION`: OpenAPI application metadata.
+- `APP_ENV`: environment label returned by the health endpoint.
+- `ALLOWED_CORS_ORIGINS`: comma-separated origins. Localhost ports 3000 and
+  5173 are allowed by default for development; production origins must be set
+  explicitly.
+
+A basic scheduling workflow is:
+
+1. Read teachers, rooms, groups, activities, and availability.
+2. `POST /schedules` to create a logical timetable.
+3. `POST /schedules/{id}/drafts` with candidate time slots.
+4. Inspect or compare versions under `/schedules/{id}/versions` and
+   `/schedules/{id}/compare`.
+5. Explicitly publish a draft with
+   `POST /schedules/{id}/versions/{version_id}/publish`.
+
+The API does not automatically create or migrate production tables. A migration
+system and deployment workflow remain separate future milestones.

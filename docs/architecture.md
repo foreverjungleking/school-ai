@@ -3,16 +3,18 @@
 ## Core Application
 
 ```text
-Future API / MCP / UI
-          |
-          v
-  Application Services
-       /          \
-      v            v
-Repositories    Scheduler interface
-      |            |
-      v            v
- PostgreSQL    CP-SAT engine
+Browser / Future UI
+        |
+        v
+     FastAPI ---------+
+                       |
+Future MCP Server -----+--> Application Services
+                              /          \
+                             v            v
+                       Repositories    Scheduler interface
+                             |            |
+                             v            v
+                        PostgreSQL    CP-SAT engine
 ```
 
 Application services own orchestration and transaction boundaries. Repositories
@@ -22,6 +24,19 @@ database logic. PostgreSQL is the source of truth for application state, while
 the OR-Tools CP-SAT scheduler is the authoritative scheduling engine. Future
 API, MCP, and UI adapters must call application services rather than database or
 solver internals.
+
+FastAPI is a presentation adapter. Routes validate public request schemas, call
+application services, and translate service outcomes to HTTP responses; they do
+not query SQLAlchemy or construct CP-SAT models directly. Read-only school-data
+queries also pass through a dedicated application service. Database sessions
+are request-scoped dependencies, while schedule generation and publication
+transactions remain owned by the scheduling application service. Future MCP
+tools will use these same services in parallel with FastAPI.
+
+API configuration is loaded from environment variables. The application factory
+owns the configured database engine/session factory and closes the engine during
+ASGI shutdown. CORS uses an explicit configurable origin list, with only common
+localhost development origins enabled by default.
 
 ## Planned AI Integration
 

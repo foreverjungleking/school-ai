@@ -25,8 +25,11 @@ def get_school_data_service(
 
 
 def get_scheduling_service(
+    request: Request,
     session: Session = Depends(get_session),
 ) -> SchedulingService:
     return SchedulingService(
-        ScheduleRepository(session), SchedulingDataRepository(session)
+        ScheduleRepository(session),
+        SchedulingDataRepository(session),
+        max_solve_seconds=request.app.state.settings.max_solve_seconds,
     )

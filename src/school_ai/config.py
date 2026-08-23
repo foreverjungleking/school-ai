@@ -1,5 +1,6 @@
 """Centralized environment-backed application configuration."""
 
+import math
 import os
 from dataclasses import dataclass, field
 
@@ -20,6 +21,7 @@ class Settings:
     environment: str = "development"
     database_url: str = field(default_factory=get_database_url)
     allowed_cors_origins: tuple[str, ...] = _LOCAL_CORS_ORIGINS
+    max_solve_seconds: float = 15.0
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -38,4 +40,18 @@ class Settings:
             environment=environment,
             database_url=get_database_url(),
             allowed_cors_origins=origins,
+            max_solve_seconds=_positive_float("MAX_SOLVE_SECONDS", 15.0),
         )
+
+
+def _positive_float(name: str, default: float) -> float:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    try:
+        value = float(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a positive finite number") from exc
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError(f"{name} must be a positive finite number")
+    return value

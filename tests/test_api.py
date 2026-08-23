@@ -405,6 +405,24 @@ def test_cors_origins_are_loaded_from_environment(
     )
 
 
+def test_solver_time_limit_is_loaded_from_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAX_SOLVE_SECONDS", "12.5")
+
+    assert Settings.from_environment().max_solve_seconds == 12.5
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "nan", "invalid"])
+def test_solver_time_limit_must_be_positive_and_finite(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("MAX_SOLVE_SECONDS", value)
+
+    with pytest.raises(ValueError, match="MAX_SOLVE_SECONDS"):
+        Settings.from_environment()
+
+
 def test_unexpected_errors_do_not_leak_internal_details(
     api_context: tuple[TestClient, Session],
 ) -> None:

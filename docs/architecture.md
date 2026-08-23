@@ -53,6 +53,12 @@ owns the configured database engine/session factory and closes the engine during
 ASGI shutdown. CORS uses an explicit configurable origin list, with only common
 localhost development origins enabled by default.
 
+In production, Railway runs the built React assets and FastAPI as separate
+services. Browser traffic reaches the backend over its public HTTPS origin;
+only FastAPI connects to PostgreSQL over Railway private networking. Alembic is
+the production schema authority and runs before a backend deployment starts.
+Neither API startup nor demo seeding creates, drops, or resets schema objects.
+
 ## Planned AI Integration
 
 ```text
@@ -132,10 +138,12 @@ it does not implement constraints or call CP-SAT. Version comparison is
 application logic keyed by `(activity_id, session_index)` and reports unchanged,
 added, removed, and changed assignments for future presentation layers.
 
-No migration framework is currently configured. Schema creation follows the
-existing `Base.metadata.create_all()` approach; production migrations are still
-required before deployment.
+Alembic migrations represent the complete persistence schema and are applied
+with `alembic upgrade head`. The initial migration is safe for an empty
+production database and later revisions must evolve it without deleting user
+data during normal deployment.
 
-The idempotent `school_ai.demo_seed` utility adds deterministic synthetic school
-resources only to an empty database. It is an infrastructure/demo helper outside
-the solver and service business logic and refuses partially populated datasets.
+The explicit, idempotent `school_ai.demo_seed` utility adds deterministic
+synthetic school resources only after migrations have been applied. It is an
+infrastructure/demo helper outside the solver and service business logic,
+preserves a fully seeded database, and refuses partially populated datasets.

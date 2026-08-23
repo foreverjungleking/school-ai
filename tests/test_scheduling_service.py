@@ -155,6 +155,29 @@ def test_service_translates_database_domain_data_for_solver(
     assert problem.time_slots == time_slots
 
 
+def test_service_caps_requested_solver_duration(
+    session: Session,
+    school_data: tuple[Teacher, StudentGroup, Room, Activity],
+    time_slots: tuple[TimeSlot, ...],
+) -> None:
+    _, _, room, activity = school_data
+    captured: list[SchedulingProblem] = []
+
+    def recording_solver(problem: SchedulingProblem) -> SolverResult:
+        captured.append(problem)
+        return _successful_result(_assignment(activity, room))
+
+    repositories = (ScheduleRepository(session), SchedulingDataRepository(session))
+    service = SchedulingService(
+        *repositories, solver=recording_solver, max_solve_seconds=4
+    )
+    schedule = service.create_schedule("Bounded solver")
+
+    service.generate_schedule_draft(schedule.id, time_slots, max_solve_seconds=300)
+
+    assert captured[0].max_solve_seconds == 4
+
+
 def test_generating_again_creates_a_new_draft_version(
     session: Session,
     school_data: tuple[Teacher, StudentGroup, Room, Activity],

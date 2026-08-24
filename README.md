@@ -16,9 +16,9 @@ The current implementation provides:
   data into solver DTOs and persist successful results as versioned schedules
 - pytest coverage using an in-memory SQLite database
 
-The FastAPI application exposes read-only school data and the complete schedule
-draft/version/publication workflow. AI and MCP integrations are planned but are
-not yet implemented.
+The FastAPI application exposes read-only school data, the complete schedule
+draft/version/publication workflow, and a first controlled AI harness over an
+approved MCP tool surface. The React UI does not include chat yet.
 
 ## Schedule lifecycle
 
@@ -147,3 +147,50 @@ The repository includes Railway configuration for a root FastAPI service and a
 `frontend/` static service. PostgreSQL migrations, deterministic one-time demo
 seeding, environment variables, custom-domain setup, and the production smoke
 test are documented in [docs/deployment-railway.md](docs/deployment-railway.md).
+
+## AI harness and MCP
+
+`POST /ai/chat` invokes a provider-neutral harness. The model can select only
+these MCP tools:
+
+- `list_teachers`, `list_rooms`, `list_student_groups`, `list_activities`
+- `get_schedule`, `get_schedule_version`, `get_published_schedule`
+- `compare_schedule_versions`
+- `create_schedule_draft`
+
+The MCP adapter delegates to existing application services. It contains no
+SQLAlchemy/session queries and constructs no CP-SAT model. There is deliberately
+no publish tool: users must review and publish drafts through the existing
+API/UI. `INFEASIBLE` and `UNKNOWN` solver outcomes are reported as failures and
+never converted into a timetable.
+
+Select a provider through environment variables. For local Ollama:
+
+```bash
+export AI_PROVIDER=ollama
+export OLLAMA_BASE_URL=http://localhost:11434
+export OLLAMA_MODEL=<installed-tool-capable-model>
+```
+
+For OpenAI's Responses API:
+
+```bash
+export AI_PROVIDER=openai
+export OPENAI_API_KEY=<secret>
+export OPENAI_MODEL=<tool-capable-model>
+```
+
+No OpenAI key is needed for Ollama or tests. Example request:
+
+```bash
+curl -X POST http://127.0.0.1:8000/ai/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"Show me the published schedule for schedule 1"}'
+```
+
+This first milestone performs at most one approved tool call per chat request
+and uses an in-process MCP client boundary; the same tools can be registered on
+the official MCP Python SDK server for a future external transport. Draft
+generation currently requires the model to provide a schedule ID and explicit
+candidate time slots. There is no UI chat, conversation memory, authentication,
+streaming, RAG, autonomous publication, or multi-agent orchestration yet.

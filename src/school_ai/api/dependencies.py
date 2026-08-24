@@ -5,6 +5,9 @@ from collections.abc import Generator
 from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
+from school_ai.ai.harness import AIHarness
+from school_ai.ai.providers import create_provider
+from school_ai.mcp import InProcessMCPClient, SchoolMCPServer
 from school_ai.repositories import (
     ScheduleRepository,
     SchoolDataRepository,
@@ -33,3 +36,11 @@ def get_scheduling_service(
         SchedulingDataRepository(session),
         max_solve_seconds=request.app.state.settings.max_solve_seconds,
     )
+
+
+def get_ai_harness(
+    school_data: SchoolDataService = Depends(get_school_data_service),
+    scheduling: SchedulingService = Depends(get_scheduling_service),
+) -> AIHarness:
+    server = SchoolMCPServer(school_data, scheduling)
+    return AIHarness(create_provider(), InProcessMCPClient(server))

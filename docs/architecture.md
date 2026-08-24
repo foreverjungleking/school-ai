@@ -85,8 +85,11 @@ Eight read tools expose school/schedule data and comparison. The sole write tool
 asks the scheduling service to create a CP-SAT-backed `DRAFT`. No publish tool is
 registered. A user must publish separately through the existing REST/UI flow.
 
-The harness executes at most one allow-listed tool call, validates arguments,
-and asks the provider to summarize the structured result. Solver `INFEASIBLE`
+The harness executes a bounded loop of at most four allow-listed tool calls,
+validates every tool name and argument payload, and asks the provider to
+summarize structured results. A deterministic FakeProvider supports tests with
+no network or credentials; Ollama is the local real-model option, while the
+OpenAI adapter is configured only when explicitly selected. Solver `INFEASIBLE`
 or `UNKNOWN` outcomes bypass model summarization and produce a deterministic
 no-draft response, preventing fabricated success. Arbitrary tool names,
 additional tool calls, SQL access, direct lesson edits, constraint changes, and

@@ -9,6 +9,8 @@ from school_ai.ai.providers.base import ProviderResponseError
 
 
 class OllamaProvider:
+    name = "ollama"
+
     def __init__(self, base_url: str, model: str, timeout_seconds: float = 60) -> None:
         self._base_url = base_url.rstrip("/")
         self._model = model

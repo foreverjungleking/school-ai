@@ -14,6 +14,9 @@ class ProviderResponseError(RuntimeError):
 
 
 class LLMProvider(Protocol):
+    @property
+    def name(self) -> str: ...
+
     async def generate(
         self,
         messages: tuple[ChatMessage, ...],

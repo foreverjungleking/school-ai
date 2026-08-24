@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from school_ai.ai.harness import AIHarness, HarnessError
 from school_ai.ai.models import ProviderTurn, ToolCall
+from school_ai.ai.providers.fake import FakeProvider
 from school_ai.ai.providers.factory import create_provider
 from school_ai.ai.providers.base import ProviderConfigurationError
 from school_ai.ai.providers.ollama import OllamaProvider
@@ -22,16 +23,6 @@ from school_ai.services import SchoolDataService, SchedulingService
 from school_ai.services.dto import GenerateScheduleResult, ScheduleVersionView
 from school_ai.services.school_data import TeacherView
 from school_ai.solver import SolveStatus, TimeSlot
-
-
-class FakeProvider:
-    def __init__(self, *turns: Any) -> None:
-        self.turns = list(turns)
-        self.calls: list[tuple[Any, Any]] = []
-
-    async def generate(self, messages, tools):
-        self.calls.append((messages, tools))
-        return self.turns.pop(0)
 
 
 def _version() -> ScheduleVersionView:
@@ -153,6 +144,28 @@ def test_harness_provider_is_replaceable_and_can_call_read_tool() -> None:
     assert len(provider.calls[0][1]) == 9
 
 
+def test_fake_provider_can_request_published_schedule() -> None:
+    school_data, scheduling = _services()
+    provider = FakeProvider(
+        ProviderTurn(
+            tool_calls=(
+                ToolCall(name="get_published_schedule", arguments={"schedule_id": 7}),
+            )
+        ),
+        ProviderTurn(text="Schedule 7 has published version 2."),
+    )
+
+    result = asyncio.run(
+        AIHarness(provider, _client(school_data, scheduling)).chat(
+            "Show the published schedule"
+        )
+    )
+
+    scheduling.get_published_schedule_version.assert_called_once_with(7)
+    assert result.metadata["provider"] == "fake"
+    assert result.metadata["version_id"] == 11
+
+
 def test_harness_can_request_cp_sat_draft() -> None:
     school_data, scheduling = _services()
     provider = FakeProvider(
@@ -215,6 +228,21 @@ def test_harness_handles_malformed_provider_output() -> None:
         asyncio.run(harness.chat("Show teachers"))
 
 
+def test_harness_enforces_tool_iteration_limit() -> None:
+    school_data, scheduling = _services()
+    requested = ProviderTurn(tool_calls=(ToolCall(name="list_teachers"),))
+    provider = FakeProvider(requested, requested, requested)
+    harness = AIHarness(
+        provider, _client(school_data, scheduling), max_tool_iterations=2
+    )
+
+    with pytest.raises(HarnessError, match="iteration limit"):
+        asyncio.run(harness.chat("Keep listing teachers"))
+
+    assert school_data.list_teachers.call_count == 2
+    assert provider.calls[-1][1] == ()
+
+
 def test_missing_provider_configuration_is_clear(monkeypatch) -> None:
     monkeypatch.delenv("AI_PROVIDER", raising=False)
 
@@ -227,6 +255,27 @@ def test_provider_factory_selects_ollama_without_network_access(monkeypatch) -> 
     monkeypatch.setenv("OLLAMA_MODEL", "test-model")
 
     assert isinstance(create_provider(), OllamaProvider)
+
+
+def test_provider_factory_selects_fake_without_credentials(monkeypatch) -> None:
+    monkeypatch.setenv("AI_PROVIDER", "fake")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OLLAMA_MODEL", raising=False)
+
+    provider = create_provider()
+
+    assert isinstance(provider, FakeProvider)
+    result = asyncio.run(provider.generate((), ()))
+    assert "FakeProvider" in result.text
+
+
+def test_openai_selection_requires_api_key_only_when_selected(monkeypatch) -> None:
+    monkeypatch.setenv("AI_PROVIDER", "openai")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_MODEL", "test-model")
+
+    with pytest.raises(ProviderConfigurationError, match="OPENAI_API_KEY"):
+        create_provider()
 
 
 def test_provider_factory_selects_openai_without_network_access(monkeypatch) -> None:
@@ -271,3 +320,28 @@ def test_ai_chat_reports_missing_provider_configuration(monkeypatch) -> None:
 
     assert response.status_code == 503
     assert response.json()["detail"]["code"] == "AI_PROVIDER_NOT_CONFIGURED"
+
+
+def test_ai_chat_runs_with_fake_provider_and_no_credentials(monkeypatch) -> None:
+    monkeypatch.setenv("AI_PROVIDER", "fake")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OLLAMA_MODEL", raising=False)
+    application = create_app(
+        Settings(environment="test", database_url="sqlite+pysqlite:///:memory:")
+    )
+
+    with TestClient(application) as client:
+        response = client.post("/ai/chat", json={"message": "Safe local smoke test"})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "assistant_text": (
+            "FakeProvider is configured; no tool response was scripted."
+        ),
+        "tool_calls": [],
+        "metadata": {
+            "provider": "fake",
+            "tool_iterations": 0,
+            "draft_created": False,
+        },
+    }

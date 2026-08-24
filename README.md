@@ -164,12 +164,29 @@ no publish tool: users must review and publish drafts through the existing
 API/UI. `INFEASIBLE` and `UNKNOWN` solver outcomes are reported as failures and
 never converted into a timetable.
 
-Select a provider through environment variables. For local Ollama:
+Select a provider through environment variables. The application does not
+construct a provider during startup, so the deterministic API/UI remains
+available when AI variables are absent. For deterministic, network-free local
+smoke testing:
 
 ```bash
+export AI_PROVIDER=fake
+```
+
+`FakeProvider` is scripted directly in automated tests to simulate tool calls;
+the environment-selected instance returns a fixed informational response and
+uses no credentials.
+
+For a real local Ollama model, install Ollama separately and pull a model with
+tool support (the application never downloads one automatically), then run:
+
+```bash
+ollama serve
+ollama pull <tool-capable-model>
 export AI_PROVIDER=ollama
 export OLLAMA_BASE_URL=http://localhost:11434
 export OLLAMA_MODEL=<installed-tool-capable-model>
+uvicorn school_ai.api.app:app --host 127.0.0.1 --port 8000
 ```
 
 For OpenAI's Responses API:
@@ -180,7 +197,10 @@ export OPENAI_API_KEY=<secret>
 export OPENAI_MODEL=<tool-capable-model>
 ```
 
-No OpenAI key is needed for Ollama or tests. Example request:
+`OPENAI_API_KEY` is read only when `AI_PROVIDER=openai`; selecting OpenAI
+without it returns `AI_PROVIDER_NOT_CONFIGURED` from `/ai/chat` and does not
+prevent FastAPI startup. No OpenAI key is needed for FakeProvider, Ollama, or
+tests. Example request:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/ai/chat \
@@ -188,9 +208,11 @@ curl -X POST http://127.0.0.1:8000/ai/chat \
   -d '{"message":"Show me the published schedule for schedule 1"}'
 ```
 
-This first milestone performs at most one approved tool call per chat request
-and uses an in-process MCP client boundary; the same tools can be registered on
-the official MCP Python SDK server for a future external transport. Draft
+This first milestone performs at most four sequential approved tool calls per
+chat request and uses an in-process MCP client boundary; the same tools can be
+registered on the official MCP Python SDK server for a future external
+transport. Each requested name and its arguments are validated before
+execution. Draft
 generation currently requires the model to provide a schedule ID and explicit
 candidate time slots. There is no UI chat, conversation memory, authentication,
 streaming, RAG, autonomous publication, or multi-agent orchestration yet.

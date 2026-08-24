@@ -3,12 +3,17 @@
 import os
 
 from school_ai.ai.providers.base import LLMProvider, ProviderConfigurationError
+from school_ai.ai.providers.fake import FakeProvider
 from school_ai.ai.providers.ollama import OllamaProvider
 from school_ai.ai.providers.openai import OpenAIProvider
 
 
 def create_provider() -> LLMProvider:
     provider = os.getenv("AI_PROVIDER", "").strip().lower()
+    if provider == "fake":
+        return FakeProvider(
+            {"text": "FakeProvider is configured; no tool response was scripted."}
+        )
     if provider == "ollama":
         model = os.getenv("OLLAMA_MODEL", "").strip()
         if not model:
@@ -17,7 +22,15 @@ def create_provider() -> LLMProvider:
     if provider == "openai":
         api_key = os.getenv("OPENAI_API_KEY", "").strip()
         model = os.getenv("OPENAI_MODEL", "").strip()
-        if not api_key or not model:
-            raise ProviderConfigurationError("OPENAI_API_KEY and OPENAI_MODEL are required")
+        if not api_key:
+            raise ProviderConfigurationError(
+                "OPENAI_API_KEY is required when AI_PROVIDER=openai"
+            )
+        if not model:
+            raise ProviderConfigurationError(
+                "OPENAI_MODEL is required when AI_PROVIDER=openai"
+            )
         return OpenAIProvider(api_key, model)
-    raise ProviderConfigurationError("AI_PROVIDER must be 'ollama' or 'openai'")
+    raise ProviderConfigurationError(
+        "AI_PROVIDER must be 'fake', 'ollama', or 'openai'"
+    )

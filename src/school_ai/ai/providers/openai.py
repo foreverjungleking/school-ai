@@ -6,11 +6,21 @@ from typing import Any
 import httpx
 
 from school_ai.ai.models import ChatMessage, ProviderTurn, ToolCall, ToolDefinition
-from school_ai.ai.providers.base import ProviderResponseError
+from school_ai.ai.providers.base import ProviderConfigurationError, ProviderResponseError
 
 
 class OpenAIProvider:
+    name = "openai"
+
     def __init__(self, api_key: str, model: str, timeout_seconds: float = 60) -> None:
+        if not api_key.strip():
+            raise ProviderConfigurationError(
+                "OPENAI_API_KEY is required when AI_PROVIDER=openai"
+            )
+        if not model.strip():
+            raise ProviderConfigurationError(
+                "OPENAI_MODEL is required when AI_PROVIDER=openai"
+            )
         self._api_key = api_key
         self._model = model
         self._timeout = timeout_seconds
@@ -23,6 +33,7 @@ class OpenAIProvider:
             "input": [_openai_message(item) for item in messages],
             "tools": [_openai_tool(item) for item in tools],
             "tool_choice": "auto" if tools else "none",
+            "parallel_tool_calls": False,
         }
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:

@@ -14,6 +14,7 @@ function errorMessage(error: unknown) {
   if (error instanceof ApiError) {
     if (error.code === "SCHEDULE_INFEASIBLE") return "No valid timetable fits the current resources and time slots. Nothing was saved.";
     if (error.code === "SOLVER_STATUS_UNKNOWN") return "The solver could not confirm a timetable in time. Nothing was saved; try again.";
+    if (error.code === "SCHEDULING_DATA_INCOMPLETE") return "School scheduling data is not ready yet. Load the synthetic demo data, then try again.";
     return error.message;
   }
   return "Something went wrong. Please try again.";

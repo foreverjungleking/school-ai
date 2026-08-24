@@ -89,7 +89,14 @@ railway ssh --service Backend -- python -m school_ai.demo_seed
 
 Seeding is not startup behavior. Repeating it preserves a complete seed and
 adds nothing; a partial school dataset is rejected rather than deleted. There
-is no public reset endpoint.
+is no public reset endpoint. The installed project uses explicit setuptools
+src-layout discovery, so the supported production command is
+`python -m school_ai.demo_seed` without setting `PYTHONPATH`.
+
+The expected first-run order is: apply Alembic migrations during Backend
+pre-deploy, run the seed command once, verify the school-data endpoints, and
+only then generate the first draft. If master data is absent, the API returns
+`SCHEDULING_DATA_INCOMPLETE` with the missing categories and persists no draft.
 
 ### Frontend
 

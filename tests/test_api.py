@@ -310,6 +310,29 @@ def test_invalid_requests_return_validation_errors(
     assert response.status_code == 422
 
 
+def test_empty_scheduling_data_returns_specific_safe_error(
+    api_context: tuple[TestClient, Session],
+) -> None:
+    client, session = api_context
+    schedule_id = _create_schedule(client, "Empty data timetable")
+    for model in (Activity, Teacher, Room, StudentGroup):
+        session.query(model).delete()
+    session.commit()
+
+    response = client.post(f"/schedules/{schedule_id}/drafts", json=_draft_payload())
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": {
+            "code": "SCHEDULING_DATA_INCOMPLETE",
+            "message": (
+                "Cannot generate a schedule until demo data is loaded. "
+                "Missing: teachers, rooms, student groups, activities."
+            ),
+        }
+    }
+
+
 def test_infeasible_generation_has_structured_conflict_response(
     api_context: tuple[TestClient, Session],
 ) -> None:

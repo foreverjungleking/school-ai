@@ -63,3 +63,24 @@ test("generates a draft once and opens the timetable", async () => {
   expect(screen.getByText("Mathematics")).toBeInTheDocument();
   expect(screen.getByText(/Draft version 2 created by CP-SAT/)).toBeInTheDocument();
 });
+
+test("explains when scheduling master data has not been seeded", async () => {
+  const user = userEvent.setup();
+  vi.stubGlobal("fetch", vi.fn((input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/teachers")) return jsonResponse([]);
+    if (url.endsWith("/rooms")) return jsonResponse([]);
+    if (url.endsWith("/student-groups")) return jsonResponse([]);
+    if (url.endsWith("/activities")) return jsonResponse([]);
+    if (url.endsWith("/schedules") && init?.method === "POST") return jsonResponse({ id: 8, name: "School AI Demo Timetable", latest_draft_version_id: null, published_version_id: null }, 201);
+    if (url.endsWith("/schedules/8/drafts")) return jsonResponse({ detail: { code: "SCHEDULING_DATA_INCOMPLETE", message: "Cannot generate a schedule until demo data is loaded." } }, 409);
+    throw new Error(`Unexpected request: ${url}`);
+  }));
+  render(<App />);
+
+  await user.click(await screen.findByRole("button", { name: "Generate new draft" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "School scheduling data is not ready yet. Load the synthetic demo data, then try again.",
+  );
+});

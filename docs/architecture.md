@@ -81,9 +81,12 @@ This keeps protocol transport separate from application capabilities.
 
 The MCP adapter delegates only to `SchoolDataService` and `SchedulingService`;
 it has no SQLAlchemy session, SQL, repository, or CP-SAT construction logic.
-Eight read tools expose school/schedule data and comparison. The sole write tool
-asks the scheduling service to create a CP-SAT-backed `DRAFT`. No publish tool is
-registered. A user must publish separately through the existing REST/UI flow.
+Nine read tools expose school/schedule data, current-demo schedule discovery,
+and comparison. The sole write tool asks the scheduling service to create a
+CP-SAT-backed `DRAFT`. The service resolves an omitted schedule ID to the newest
+logical demo schedule and owns the standard candidate time-slot grid. No publish
+tool is registered. A user must publish separately through the existing REST/UI
+flow.
 
 The harness executes a bounded loop of at most four allow-listed tool calls,
 validates every tool name and argument payload, and asks the provider to
@@ -95,6 +98,14 @@ no-draft response, preventing fabricated success. Arbitrary tool names,
 additional tool calls, SQL access, direct lesson edits, constraint changes, and
 autonomous publishing are rejected by construction. RAG remains a future layer
 for unstructured policy documents only.
+
+Ollama attempts its native function-call format first. When a model returns no
+native call, the adapter makes a schema-constrained fallback request using the
+same provider-neutral `ProviderTurn` JSON contract, temperature zero, strict
+Pydantic validation, and no dynamic code execution. Only tools relevant to the
+current request are sent when they can be identified cheaply. Full lesson lists
+remain in the structured API result but are reduced to counts in the model's
+summarization context.
 
 ## Source Layout
 

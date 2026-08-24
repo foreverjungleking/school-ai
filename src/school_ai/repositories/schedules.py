@@ -25,6 +25,11 @@ class ScheduleRepository:
     def get_schedule(self, schedule_id: int) -> Schedule | None:
         return self._session.get(Schedule, schedule_id)
 
+    def get_current_schedule(self) -> Schedule | None:
+        return self._session.scalar(
+            select(Schedule).order_by(Schedule.id.desc()).limit(1)
+        )
+
     def create_version(
         self, schedule: Schedule, solver_result: SolverResult
     ) -> ScheduleVersion:

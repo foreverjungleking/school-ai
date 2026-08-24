@@ -1,5 +1,6 @@
 import asyncio
-from datetime import datetime, time, timezone
+import json
+from datetime import datetime, timezone
 from typing import Any
 from unittest.mock import Mock
 
@@ -10,7 +11,7 @@ from school_ai.ai.harness import AIHarness, HarnessError
 from school_ai.ai.models import ProviderTurn, ToolCall
 from school_ai.ai.providers.fake import FakeProvider
 from school_ai.ai.providers.factory import create_provider
-from school_ai.ai.providers.base import ProviderConfigurationError
+from school_ai.ai.providers.base import ProviderConfigurationError, ProviderResponseError
 from school_ai.ai.providers.ollama import OllamaProvider
 from school_ai.ai.providers.openai import OpenAIProvider
 from school_ai.api.app import create_app
@@ -20,9 +21,13 @@ from school_ai.database.models import ScheduleVersionStatus
 from school_ai.mcp.client import InProcessMCPClient
 from school_ai.mcp.server import SchoolMCPServer, create_mcp_sdk_server
 from school_ai.services import SchoolDataService, SchedulingService
-from school_ai.services.dto import GenerateScheduleResult, ScheduleVersionView
+from school_ai.services.dto import (
+    GenerateScheduleResult,
+    ScheduleSummary,
+    ScheduleVersionView,
+)
 from school_ai.services.school_data import TeacherView
-from school_ai.solver import SolveStatus, TimeSlot
+from school_ai.solver import SolveStatus
 
 
 def _version() -> ScheduleVersionView:
@@ -49,6 +54,12 @@ def _services() -> tuple[Mock, Mock]:
     school_data.list_student_groups.return_value = ()
     school_data.list_activities.return_value = ()
     scheduling = Mock(spec=SchedulingService)
+    scheduling.get_current_demo_schedule.return_value = ScheduleSummary(
+        id=7,
+        name="Demo timetable",
+        latest_draft_version_id=11,
+        published_version_id=10,
+    )
     scheduling.get_published_schedule_version.return_value = _version()
     scheduling.generate_schedule_draft.return_value = GenerateScheduleResult(
         solver_status=SolveStatus.OPTIMAL,
@@ -61,17 +72,7 @@ def _services() -> tuple[Mock, Mock]:
 
 
 def _draft_arguments() -> dict[str, Any]:
-    return {
-        "schedule_id": 7,
-        "time_slots": [
-            {
-                "id": 1,
-                "weekday": 0,
-                "start_time": "08:00:00",
-                "end_time": "09:00:00",
-            }
-        ],
-    }
+    return {"schedule_id": 7}
 
 
 def _client(school_data: Mock, scheduling: Mock) -> InProcessMCPClient:
@@ -101,12 +102,31 @@ def test_mcp_get_published_schedule_calls_application_service() -> None:
 def test_mcp_create_draft_calls_application_service() -> None:
     school_data, scheduling = _services()
     server = SchoolMCPServer(school_data, scheduling)
-    slot = TimeSlot(id=1, weekday=0, start_time=time(8), end_time=time(9))
+    result = server.create_schedule_draft(7, 3)
 
-    result = server.create_schedule_draft(7, (slot,), 3)
-
-    scheduling.generate_schedule_draft.assert_called_once_with(7, (slot,), 3)
+    scheduling.generate_schedule_draft.assert_called_once_with(7, None, 3)
     assert result["version"]["id"] == 11
+
+
+def test_mcp_current_schedule_calls_application_service() -> None:
+    school_data, scheduling = _services()
+    server = SchoolMCPServer(school_data, scheduling)
+
+    result = server.get_current_demo_schedule()
+
+    scheduling.get_current_demo_schedule.assert_called_once_with()
+    assert result["published_version_id"] == 10
+
+
+def test_mcp_published_schedule_resolves_omitted_schedule_id() -> None:
+    school_data, scheduling = _services()
+    server = SchoolMCPServer(school_data, scheduling)
+
+    result = server.get_published_schedule()
+
+    scheduling.get_current_demo_schedule.assert_called_once_with()
+    scheduling.get_published_schedule_version.assert_called_once_with(7)
+    assert result["id"] == 11
 
 
 def test_official_mcp_server_exposes_only_approved_tools() -> None:
@@ -120,6 +140,7 @@ def test_official_mcp_server_exposes_only_approved_tools() -> None:
         "list_rooms",
         "list_student_groups",
         "list_activities",
+        "get_current_demo_schedule",
         "get_schedule",
         "get_schedule_version",
         "get_published_schedule",
@@ -141,7 +162,21 @@ def test_harness_provider_is_replaceable_and_can_call_read_tool() -> None:
 
     assert result.assistant_text == "There is one teacher: Ms Lim."
     assert result.tool_calls[0].name == "list_teachers"
-    assert len(provider.calls[0][1]) == 9
+    assert [tool.name for tool in provider.calls[0][1]] == ["list_teachers"]
+
+
+def test_harness_sends_no_tools_for_capability_question() -> None:
+    school_data, scheduling = _services()
+    provider = FakeProvider(ProviderTurn(text="I can read school data and make drafts."))
+
+    result = asyncio.run(
+        AIHarness(provider, _client(school_data, scheduling)).chat(
+            "What can you help me with?"
+        )
+    )
+
+    assert result.assistant_text.startswith("I can read")
+    assert provider.calls[0][1] == ()
 
 
 def test_fake_provider_can_request_published_schedule() -> None:
@@ -241,6 +276,69 @@ def test_harness_enforces_tool_iteration_limit() -> None:
 
     assert school_data.list_teachers.call_count == 2
     assert provider.calls[-1][1] == ()
+
+
+class _OllamaResponse:
+    def __init__(self, message: dict[str, Any]) -> None:
+        self._message = message
+
+    def raise_for_status(self) -> None:
+        pass
+
+    def json(self) -> dict[str, Any]:
+        return {"message": self._message}
+
+
+class _OllamaClient:
+    response: _OllamaResponse
+
+    def __init__(self, **kwargs: Any) -> None:
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        pass
+
+    async def post(self, *args: Any, **kwargs: Any) -> _OllamaResponse:
+        return self.response
+
+
+def test_ollama_parses_provider_neutral_json_tool_response(monkeypatch) -> None:
+    _OllamaClient.response = _OllamaResponse(
+        {
+            "content": json.dumps(
+                {
+                    "tool_calls": [
+                        {"name": "list_teachers", "arguments": {}}
+                    ],
+                    "text": "",
+                }
+            )
+        }
+    )
+    monkeypatch.setattr(
+        "school_ai.ai.providers.ollama.httpx.AsyncClient", _OllamaClient
+    )
+
+    turn = asyncio.run(
+        OllamaProvider("http://localhost:11434", "test-model").generate((), ())
+    )
+
+    assert turn.tool_calls == (ToolCall(name="list_teachers"),)
+
+
+def test_ollama_rejects_malformed_structured_response(monkeypatch) -> None:
+    _OllamaClient.response = _OllamaResponse({"content": "not JSON"})
+    monkeypatch.setattr(
+        "school_ai.ai.providers.ollama.httpx.AsyncClient", _OllamaClient
+    )
+
+    with pytest.raises(ProviderResponseError, match="invalid response"):
+        asyncio.run(
+            OllamaProvider("http://localhost:11434", "test-model").generate((), ())
+        )
 
 
 def test_missing_provider_configuration_is_clear(monkeypatch) -> None:

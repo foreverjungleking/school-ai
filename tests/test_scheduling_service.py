@@ -17,6 +17,7 @@ from school_ai.database.models import (
 from school_ai.repositories import ScheduleRepository, SchedulingDataRepository
 from school_ai.services.scheduling import (
     InvalidScheduleTransitionError,
+    ScheduleNotFoundError,
     SchedulingDataIncompleteError,
     SchedulingService,
 )
@@ -171,6 +172,53 @@ def test_service_translates_database_domain_data_for_solver(
     assert problem.rooms[0].capacity == room.capacity
     assert problem.activities[0].duration_minutes == activity.duration_minutes
     assert problem.time_slots == time_slots
+
+
+def test_service_builds_standard_slots_when_draft_slots_are_omitted(
+    session: Session,
+    school_data: tuple[Teacher, StudentGroup, Room, Activity],
+) -> None:
+    _, _, room, activity = school_data
+    captured: list[SchedulingProblem] = []
+
+    def recording_solver(problem: SchedulingProblem) -> SolverResult:
+        captured.append(problem)
+        return _successful_result(_assignment(activity, room))
+
+    service = _service(session, recording_solver)
+    schedule = service.create_schedule("Default slot timetable")
+
+    result = service.generate_schedule_draft(schedule.id)
+
+    assert result.version is not None
+    slots = captured[0].time_slots
+    assert len(slots) == 40
+    assert (slots[0].weekday, slots[0].start_time, slots[0].end_time) == (
+        0,
+        time(8),
+        time(9),
+    )
+    assert (slots[-1].weekday, slots[-1].start_time, slots[-1].end_time) == (
+        4,
+        time(15),
+        time(16),
+    )
+
+
+def test_service_discovers_newest_demo_schedule(session: Session) -> None:
+    service = _service(session)
+    service.create_schedule("First timetable")
+    second = service.create_schedule("Second timetable")
+
+    current = service.get_current_demo_schedule()
+
+    assert current.id == second.id
+    assert current.name == "Second timetable"
+
+
+def test_current_demo_schedule_requires_an_existing_schedule(session: Session) -> None:
+    with pytest.raises(ScheduleNotFoundError, match="no demo schedule"):
+        _service(session).get_current_demo_schedule()
 
 
 def test_service_caps_requested_solver_duration(

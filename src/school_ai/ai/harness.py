@@ -16,11 +16,11 @@ from school_ai.ai.providers.base import LLMProvider, ProviderResponseError
 from school_ai.mcp.client import MCPClient
 from school_ai.mcp.server import ToolNotAllowedError
 
-_SYSTEM_PROMPT = """You are the School AI assistant. Use only the supplied tools.
-CP-SAT is authoritative. Never invent lessons or claim a draft exists unless the
-tool result contains a version. Publishing is unavailable and must remain a
-deliberate user action in the normal UI/API. Do not propose SQL or constraint
-relaxation. Request at most one approved tool at a time."""
+_SYSTEM_PROMPT = """Use tools for factual school and schedule data. Never invent
+timetable assignments: CP-SAT is authoritative. Never claim a draft exists
+without a successful tool result. Publishing is unavailable. Request one tool
+at a time. If a schedule ID is missing, use get_current_demo_schedule or omit
+the optional schedule_id so the service resolves the current demo schedule."""
 
 
 class HarnessError(RuntimeError):
@@ -48,10 +48,11 @@ class AIHarness:
             ChatMessage(role="user", content=message.strip()),
         ]
         executions: list[ToolExecution] = []
+        available_tools = _relevant_tools(message, self._mcp.tool_definitions)
 
         while True:
             tools = (
-                self._mcp.tool_definitions
+                available_tools
                 if len(executions) < self._max_tool_iterations
                 else ()
             )
@@ -97,7 +98,7 @@ class AIHarness:
                 (
                     ChatMessage(
                         role="tool",
-                        content=json.dumps(execution.model_dump(mode="json")),
+                        content=json.dumps(_compact_tool_execution(execution)),
                     ),
                     ChatMessage(
                         role="user",
@@ -163,6 +164,68 @@ def _result_metadata(
         if result.get("solver_status") is not None:
             metadata.setdefault("solver_status", result["solver_status"])
     return {key: value for key, value in metadata.items() if value is not None}
+
+
+def _compact_tool_execution(execution: ToolExecution) -> dict[str, Any]:
+    payload = execution.model_dump(mode="json", exclude={"result"})
+    payload["result"] = _compact_result(execution.result)
+    return payload
+
+
+def _compact_result(result: Any) -> Any:
+    if not isinstance(result, dict):
+        return result
+    compact = dict(result)
+    lessons = compact.pop("lessons", None)
+    if isinstance(lessons, list):
+        compact["lesson_count"] = len(lessons)
+    version = compact.get("version")
+    if isinstance(version, dict):
+        compact["version"] = _compact_result(version)
+    for name in ("unchanged", "added", "removed", "changed"):
+        items = compact.pop(name, None)
+        if isinstance(items, list):
+            compact[f"{name}_count"] = len(items)
+    return compact
+
+
+def _relevant_tools(
+    message: str, tools: tuple[ToolDefinition, ...]
+) -> tuple[ToolDefinition, ...]:
+    """Keep obvious requests small while preserving a safe general fallback."""
+
+    text = message.lower()
+    if "what can you help" in text or "what can you do" in text:
+        return ()
+    names: set[str] = set()
+    for keyword, matching in (
+        ("teacher", {"list_teachers"}),
+        ("room", {"list_rooms"}),
+        ("student", {"list_student_groups"}),
+        ("group", {"list_student_groups"}),
+        ("activit", {"list_activities"}),
+        (
+            "publish",
+            {"get_current_demo_schedule", "get_schedule", "get_published_schedule"},
+        ),
+        (
+            "timetable",
+            {"get_current_demo_schedule", "get_schedule", "get_published_schedule"},
+        ),
+        (
+            "schedule",
+            {"get_current_demo_schedule", "get_schedule", "get_published_schedule"},
+        ),
+        ("version", {"get_current_demo_schedule", "get_schedule_version"}),
+        ("compare", {"get_current_demo_schedule", "compare_schedule_versions"}),
+        ("draft", {"get_current_demo_schedule", "create_schedule_draft"}),
+        ("generate", {"get_current_demo_schedule", "create_schedule_draft"}),
+    ):
+        if keyword in text:
+            names.update(matching)
+    if not names:
+        return tools
+    return tuple(tool for tool in tools if tool.name in names)
 
 
 def _draft_created(execution: ToolExecution) -> bool:

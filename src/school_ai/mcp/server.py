@@ -7,7 +7,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from school_ai.ai.models import ToolDefinition
 from school_ai.services import SchoolDataService, SchedulingService
-from school_ai.solver import TimeSlot
 
 
 class ToolArguments(BaseModel):
@@ -19,7 +18,7 @@ class EmptyArguments(ToolArguments):
 
 
 class ScheduleArguments(ToolArguments):
-    schedule_id: int = Field(gt=0)
+    schedule_id: int | None = Field(default=None, gt=0)
 
 
 class VersionArguments(ToolArguments):
@@ -34,8 +33,7 @@ class CompareArguments(ToolArguments):
 
 
 class DraftArguments(ToolArguments):
-    schedule_id: int = Field(gt=0)
-    time_slots: tuple[TimeSlot, ...] = Field(min_length=1)
+    schedule_id: int | None = Field(default=None, gt=0)
     max_solve_seconds: float = Field(default=10, gt=0, allow_inf_nan=False)
 
 
@@ -44,6 +42,7 @@ _TOOL_MODELS: dict[str, type[ToolArguments]] = {
     "list_rooms": EmptyArguments,
     "list_student_groups": EmptyArguments,
     "list_activities": EmptyArguments,
+    "get_current_demo_schedule": EmptyArguments,
     "get_schedule": ScheduleArguments,
     "get_schedule_version": VersionArguments,
     "get_published_schedule": ScheduleArguments,
@@ -56,6 +55,9 @@ _DESCRIPTIONS = {
     "list_rooms": "List rooms, capacity, type, and availability.",
     "list_student_groups": "List student groups and sizes.",
     "list_activities": "List activities and scheduling requirements.",
+    "get_current_demo_schedule": (
+        "Get the newest demo schedule and its current version IDs."
+    ),
     "get_schedule": "Get a logical schedule summary by ID.",
     "get_schedule_version": "Get a complete stored schedule version.",
     "get_published_schedule": "Get the currently published version for a schedule.",
@@ -108,8 +110,18 @@ class SchoolMCPServer:
     def list_activities(self) -> list[dict[str, Any]]:
         return [item.model_dump(mode="json") for item in self._school_data.list_activities()]
 
-    def get_schedule(self, schedule_id: int) -> dict[str, Any]:
-        return self._scheduling.get_schedule(schedule_id).model_dump(mode="json")
+    def get_current_demo_schedule(self) -> dict[str, Any]:
+        return self._scheduling.get_current_demo_schedule().model_dump(mode="json")
+
+    def _schedule_id(self, schedule_id: int | None) -> int:
+        if schedule_id is not None:
+            return schedule_id
+        return self._scheduling.get_current_demo_schedule().id
+
+    def get_schedule(self, schedule_id: int | None = None) -> dict[str, Any]:
+        return self._scheduling.get_schedule(
+            self._schedule_id(schedule_id)
+        ).model_dump(mode="json")
 
     def get_schedule_version(
         self, schedule_id: int, version_id: int
@@ -118,10 +130,10 @@ class SchoolMCPServer:
             version_id, schedule_id
         ).model_dump(mode="json")
 
-    def get_published_schedule(self, schedule_id: int) -> dict[str, Any]:
-        return self._scheduling.get_published_schedule_version(schedule_id).model_dump(
-            mode="json"
-        )
+    def get_published_schedule(self, schedule_id: int | None = None) -> dict[str, Any]:
+        return self._scheduling.get_published_schedule_version(
+            self._schedule_id(schedule_id)
+        ).model_dump(mode="json")
 
     def compare_schedule_versions(
         self, schedule_id: int, from_version_id: int, to_version_id: int
@@ -132,12 +144,12 @@ class SchoolMCPServer:
 
     def create_schedule_draft(
         self,
-        schedule_id: int,
-        time_slots: tuple[TimeSlot, ...],
+        schedule_id: int | None = None,
         max_solve_seconds: float = 10,
     ) -> dict[str, Any]:
+        schedule_id = self._schedule_id(schedule_id)
         result = self._scheduling.generate_schedule_draft(
-            schedule_id, time_slots, max_solve_seconds
+            schedule_id, None, max_solve_seconds
         )
         return result.model_dump(mode="json")
 
@@ -170,7 +182,11 @@ def create_mcp_sdk_server(tools: SchoolMCPServer) -> MCPServer:
         return tools.list_activities()
 
     @server.tool()
-    def get_schedule(schedule_id: int) -> dict[str, Any]:
+    def get_current_demo_schedule() -> dict[str, Any]:
+        return tools.get_current_demo_schedule()
+
+    @server.tool()
+    def get_schedule(schedule_id: int | None = None) -> dict[str, Any]:
         return tools.get_schedule(schedule_id)
 
     @server.tool()
@@ -178,7 +194,7 @@ def create_mcp_sdk_server(tools: SchoolMCPServer) -> MCPServer:
         return tools.get_schedule_version(schedule_id, version_id)
 
     @server.tool()
-    def get_published_schedule(schedule_id: int) -> dict[str, Any]:
+    def get_published_schedule(schedule_id: int | None = None) -> dict[str, Any]:
         return tools.get_published_schedule(schedule_id)
 
     @server.tool()
@@ -191,13 +207,9 @@ def create_mcp_sdk_server(tools: SchoolMCPServer) -> MCPServer:
 
     @server.tool()
     def create_schedule_draft(
-        schedule_id: int,
-        time_slots: list[dict[str, Any]],
+        schedule_id: int | None = None,
         max_solve_seconds: float = 10,
     ) -> dict[str, Any]:
-        parsed = tuple(TimeSlot.model_validate(item) for item in time_slots)
-        return tools.create_schedule_draft(
-            schedule_id, parsed, max_solve_seconds
-        )
+        return tools.create_schedule_draft(schedule_id, max_solve_seconds)
 
     return server

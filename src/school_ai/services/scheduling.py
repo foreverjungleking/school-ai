@@ -50,6 +50,27 @@ class InvalidScheduleTransitionError(ValueError):
     pass
 
 
+class SchedulingDataIncompleteError(ValueError):
+    def __init__(self, missing: tuple[str, ...]) -> None:
+        self.missing = missing
+        super().__init__(f"scheduling master data is missing: {', '.join(missing)}")
+
+
+def _require_complete_scheduling_data(data: SchedulingData) -> None:
+    missing = tuple(
+        label
+        for label, records in (
+            ("teachers", data.teachers),
+            ("rooms", data.rooms),
+            ("student groups", data.student_groups),
+            ("activities", data.activities),
+        )
+        if not records
+    )
+    if missing:
+        raise SchedulingDataIncompleteError(missing)
+
+
 def _availability(
     records: Sequence[TeacherAvailability | RoomAvailability],
 ) -> tuple[AvailabilityWindow, ...]:
@@ -170,6 +191,7 @@ class SchedulingService:
     ) -> GenerateScheduleResult:
         schedule = self._require_schedule(schedule_id)
         data = self._data.load()
+        _require_complete_scheduling_data(data)
         problem = build_scheduling_problem(
             data, time_slots, min(max_solve_seconds, self._max_solve_seconds)
         )

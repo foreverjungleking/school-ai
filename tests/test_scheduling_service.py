@@ -17,6 +17,7 @@ from school_ai.database.models import (
 from school_ai.repositories import ScheduleRepository, SchedulingDataRepository
 from school_ai.services.scheduling import (
     InvalidScheduleTransitionError,
+    SchedulingDataIncompleteError,
     SchedulingService,
 )
 from school_ai.solver import (
@@ -96,6 +97,23 @@ def _successful_result(assignment: Assignment) -> SolverResult:
         assignments=(assignment,),
         solve_duration_seconds=0.1,
         metadata={"candidate_count": 2, "solver_status": "OPTIMAL"},
+    )
+
+
+def test_generation_reports_missing_master_data(
+    session: Session, time_slots: tuple[TimeSlot, ...]
+) -> None:
+    service = _service(session)
+    schedule = service.create_schedule("Empty timetable")
+
+    with pytest.raises(SchedulingDataIncompleteError) as error:
+        service.generate_schedule_draft(schedule.id, time_slots)
+
+    assert error.value.missing == (
+        "teachers",
+        "rooms",
+        "student groups",
+        "activities",
     )
 
 

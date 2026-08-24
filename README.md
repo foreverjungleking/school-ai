@@ -102,6 +102,12 @@ export DATABASE_URL='postgresql+psycopg://postgres:postgres@localhost:5432/schoo
 .venv/bin/uvicorn school_ai.api.app:app --reload
 ```
 
+In an installed production environment the supported seed command is simply
+`python -m school_ai.demo_seed`; no manual `PYTHONPATH` is required. Apply
+migrations first. A draft request made before teachers, rooms, student groups,
+and activities exist returns the structured `SCHEDULING_DATA_INCOMPLETE` error
+instead of a generic validation failure.
+
 In a second terminal, install frontend dependencies and start Vite:
 
 ```bash

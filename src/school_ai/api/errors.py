@@ -11,6 +11,7 @@ from school_ai.services.scheduling import (
     InvalidScheduleTransitionError,
     ScheduleNotFoundError,
     ScheduleVersionNotFoundError,
+    SchedulingDataIncompleteError,
 )
 from school_ai.solver import SolveStatus
 
@@ -53,6 +54,17 @@ def register_error_handlers(app: FastAPI) -> None:
         request: Request, exc: InvalidScheduleTransitionError
     ) -> JSONResponse:
         return _error(409, "INVALID_SCHEDULE_TRANSITION", str(exc))
+
+    @app.exception_handler(SchedulingDataIncompleteError)
+    async def scheduling_data_incomplete(
+        request: Request, exc: SchedulingDataIncompleteError
+    ) -> JSONResponse:
+        missing = ", ".join(exc.missing)
+        return _error(
+            409,
+            "SCHEDULING_DATA_INCOMPLETE",
+            f"Cannot generate a schedule until demo data is loaded. Missing: {missing}.",
+        )
 
     @app.exception_handler(ScheduleGenerationFailed)
     async def schedule_generation_failed(

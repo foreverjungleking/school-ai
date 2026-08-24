@@ -38,7 +38,8 @@ and explains [private networking](https://docs.railway.com/networking/private-ne
 ### Backend
 
 - Source: GitHub repository `foreverjungleking/school-ai`, branch `main`
-- Root directory: `/`
+- Root directory: `/` (or leave it empty, which defaults to the repository
+  root); never set the Backend service root to `/frontend`
 - Config file, only for an existing Config as Code service: `/railway.json`
 - Build: Railpack automatic Python dependency installation; leave the dashboard
   Build Command empty
@@ -74,6 +75,13 @@ current PEP 621 project through Railpack's normal Python dependency phase.
 Alembic. Do not configure a custom Backend Build Command. In particular, clear
 any existing dashboard override containing `python -m pip install .`; otherwise
 it supersedes this corrected build behavior.
+
+The install context must contain `pyproject.toml`, `requirements.txt`, and the
+complete `src/` directory. An `egg_base` error claiming that `src` does not
+exist means the Backend service is not building the repository root (or is
+deploying a revision older than the explicit setuptools src-layout settings).
+Set **Settings → Source → Root Directory** to `/` or clear it, confirm the
+deployment source is the latest `main` commit, and redeploy without cache.
 
 The pre-deploy command remains `alembic upgrade head`. Migration scripts live
 in `migrations/`, so there is no top-level Python namespace named `alembic` to

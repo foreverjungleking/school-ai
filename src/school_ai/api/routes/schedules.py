@@ -44,7 +44,9 @@ def generate_schedule_draft(
 ):
     result = service.generate_schedule_draft(
         schedule_id,
-        tuple(TimeSlot.model_validate(item.model_dump()) for item in request.time_slots),
+        tuple(TimeSlot.model_validate(item.model_dump()) for item in request.time_slots)
+        if request.time_slots is not None
+        else None,
         request.max_solve_seconds,
     )
     if result.version is None:

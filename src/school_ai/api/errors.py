@@ -5,6 +5,8 @@ import logging
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from school_ai.ai.harness import HarnessError
+from school_ai.ai.providers import ProviderConfigurationError
 from school_ai.services.dto import GenerateScheduleResult
 from school_ai.services.school_data import SchoolDataNotFoundError
 from school_ai.services.scheduling import (
@@ -31,6 +33,18 @@ def _error(status_code: int, code: str, message: str) -> JSONResponse:
 
 
 def register_error_handlers(app: FastAPI) -> None:
+    @app.exception_handler(ProviderConfigurationError)
+    async def provider_not_configured(
+        request: Request, exc: ProviderConfigurationError
+    ) -> JSONResponse:
+        return _error(503, "AI_PROVIDER_NOT_CONFIGURED", str(exc))
+
+    @app.exception_handler(HarnessError)
+    async def invalid_ai_response(
+        request: Request, exc: HarnessError
+    ) -> JSONResponse:
+        return _error(502, "AI_RESPONSE_INVALID", str(exc))
+
     @app.exception_handler(SchoolDataNotFoundError)
     async def school_data_not_found(
         request: Request, exc: SchoolDataNotFoundError

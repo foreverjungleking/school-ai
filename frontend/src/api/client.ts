@@ -71,7 +71,7 @@ export const schedulesApi = {
   generateDraft: (scheduleId: number) =>
     request<GenerateDraftResult>(`/schedules/${scheduleId}/drafts`, {
       method: "POST",
-      body: JSON.stringify({ time_slots: buildDemoTimeSlots(), max_solve_seconds: 10 }),
+      body: JSON.stringify({ max_solve_seconds: 10 }),
     }),
   publish: (scheduleId: number, versionId: number) =>
     request<ScheduleVersion>(`/schedules/${scheduleId}/versions/${versionId}/publish`, { method: "POST" }),
@@ -80,19 +80,3 @@ export const schedulesApi = {
       `/schedules/${scheduleId}/compare?from_version_id=${fromVersionId}&to_version_id=${toVersionId}`,
     ),
 };
-
-function buildDemoTimeSlots() {
-  const slots = [];
-  let id = 1;
-  for (let weekday = 0; weekday < 5; weekday += 1) {
-    for (let hour = 8; hour < 16; hour += 1) {
-      slots.push({
-        id: id++,
-        weekday,
-        start_time: `${String(hour).padStart(2, "0")}:00:00`,
-        end_time: `${String(hour + 1).padStart(2, "0")}:00:00`,
-      });
-    }
-  }
-  return slots;
-}

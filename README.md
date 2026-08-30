@@ -16,9 +16,9 @@ The current implementation provides:
   data into solver DTOs and persist successful results as versioned schedules
 - pytest coverage using an in-memory SQLite database
 
-The FastAPI application exposes read-only school data and the complete schedule
-draft/version/publication workflow. AI and MCP integrations are planned but are
-not yet implemented.
+The FastAPI application exposes read-only school data, the complete schedule
+draft/version/publication workflow, and a first controlled AI harness over an
+approved MCP tool surface. The React UI does not include chat yet.
 
 ## Schedule lifecycle
 
@@ -78,7 +78,9 @@ A basic scheduling workflow is:
 
 1. Read teachers, rooms, groups, activities, and availability.
 2. `POST /schedules` to create a logical timetable.
-3. `POST /schedules/{id}/drafts` with candidate time slots.
+3. `POST /schedules/{id}/drafts`; omit `time_slots` to use the standard demo
+   grid (Monday-Friday, hourly from 08:00 through 16:00), or supply custom
+   candidate slots explicitly.
 4. Inspect or compare versions under `/schedules/{id}/versions` and
    `/schedules/{id}/compare`.
 5. Explicitly publish a draft with
@@ -147,3 +149,106 @@ The repository includes Railway configuration for a root FastAPI service and a
 `frontend/` static service. PostgreSQL migrations, deterministic one-time demo
 seeding, environment variables, custom-domain setup, and the production smoke
 test are documented in [docs/deployment-railway.md](docs/deployment-railway.md).
+
+## AI harness and MCP
+
+`POST /ai/chat` invokes a provider-neutral harness. The model can select only
+these MCP tools:
+
+- `list_teachers`, `list_rooms`, `list_student_groups`, `list_activities`
+- `get_current_demo_schedule`, `get_schedule`, `get_schedule_version`,
+  `get_published_schedule`
+- `compare_schedule_versions`
+- `create_schedule_draft`
+
+The MCP adapter delegates to existing application services. It contains no
+SQLAlchemy/session queries and constructs no CP-SAT model. There is deliberately
+no publish tool: users must review and publish drafts through the existing
+API/UI. `INFEASIBLE` and `UNKNOWN` solver outcomes are reported as failures and
+never converted into a timetable.
+
+Select a provider through environment variables. The application does not
+construct a provider during startup, so the deterministic API/UI remains
+available when AI variables are absent. For deterministic, network-free local
+smoke testing:
+
+```bash
+export AI_PROVIDER=fake
+```
+
+`FakeProvider` is scripted directly in automated tests to simulate tool calls;
+the environment-selected instance returns a fixed informational response and
+uses no credentials.
+
+For a real local Ollama model, install Ollama separately and pull a model with
+tool support (the application never downloads one automatically), then run:
+
+```bash
+ollama serve
+ollama pull qwen2.5:3b
+export AI_PROVIDER=ollama
+export OLLAMA_BASE_URL=http://localhost:11434
+export OLLAMA_MODEL=qwen2.5:3b
+export DATABASE_URL=<your-local-database-url>
+uvicorn school_ai.api.app:app --host 127.0.0.1 --port 8000
+```
+
+Before the smoke test, run `alembic upgrade head` and
+`python -m school_ai.demo_seed` against that `DATABASE_URL`. Create a logical
+schedule with `POST /schedules` if the database has none. The published-read
+case naturally requires a version previously published through the normal
+REST/UI workflow; the AI is intentionally unable to publish it.
+
+In another terminal, run the opt-in end-to-end smoke test (it is deliberately
+not part of pytest):
+
+```bash
+SCHOOL_AI_API_URL=http://127.0.0.1:8000 \
+  python scripts/ollama_smoke.py
+```
+
+The four prompts should respectively produce no required factual tool, then
+`list_teachers`, `get_published_schedule`, and `create_schedule_draft` (the
+model may first call `get_current_demo_schedule`). For additional manual chat
+coverage:
+
+```bash
+curl -X POST http://127.0.0.1:8000/ai/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"Compare the newest draft with the published schedule."}'
+```
+
+The newest logical schedule is the single-school demo's “current” schedule.
+The scheduling service—not the model—resolves it and constructs the standard
+candidate slots. Custom slots remain available through the deterministic REST
+API.
+
+For OpenAI's Responses API:
+
+```bash
+export AI_PROVIDER=openai
+export OPENAI_API_KEY=<secret>
+export OPENAI_MODEL=<tool-capable-model>
+```
+
+`OPENAI_API_KEY` is read only when `AI_PROVIDER=openai`; selecting OpenAI
+without it returns `AI_PROVIDER_NOT_CONFIGURED` from `/ai/chat` and does not
+prevent FastAPI startup. No OpenAI key is needed for FakeProvider, Ollama, or
+tests. Example request:
+
+```bash
+curl -X POST http://127.0.0.1:8000/ai/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"Show me the published schedule for schedule 1"}'
+```
+
+This first milestone performs at most four sequential approved tool calls per
+chat request and uses an in-process MCP client boundary; the same tools can be
+registered on the official MCP Python SDK server for a future external
+transport. Each requested name and its arguments are validated before
+execution. Draft
+generation accepts an optional schedule ID and always obtains candidate slots
+from the scheduling service. Ollama uses native tools first and falls back to a
+strict Pydantic-validated JSON response schema; malformed JSON fails safely.
+There is no UI chat, conversation memory, authentication,
+streaming, RAG, autonomous publication, or multi-agent orchestration yet.

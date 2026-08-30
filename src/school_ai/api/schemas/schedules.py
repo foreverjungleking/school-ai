@@ -46,7 +46,7 @@ class TimeSlotRequest(ApiModel):
 
 
 class GenerateDraftRequest(ApiModel):
-    time_slots: tuple[TimeSlotRequest, ...] = Field(min_length=1)
+    time_slots: tuple[TimeSlotRequest, ...] | None = Field(default=None, min_length=1)
     max_solve_seconds: float = Field(default=10.0, gt=0, allow_inf_nan=False)
 
 

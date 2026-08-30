@@ -1,7 +1,7 @@
 """Schedule lifecycle orchestration across repositories and the CP-SAT engine."""
 
 from collections.abc import Callable, Sequence
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 import math
 
 from school_ai.database.models import (
@@ -36,6 +36,21 @@ from school_ai.solver import (
 )
 
 Solver = Callable[[SchedulingProblem], SolverResult]
+
+
+def build_standard_time_slots() -> tuple[TimeSlot, ...]:
+    """Return the public demo's weekday, hourly candidate slots."""
+
+    return tuple(
+        TimeSlot(
+            id=(weekday * 8) + hour_offset + 1,
+            weekday=weekday,
+            start_time=time(8 + hour_offset),
+            end_time=time(9 + hour_offset),
+        )
+        for weekday in range(5)
+        for hour_offset in range(8)
+    )
 
 
 class ScheduleNotFoundError(LookupError):
@@ -186,12 +201,14 @@ class SchedulingService:
     def generate_schedule_draft(
         self,
         schedule_id: int,
-        time_slots: tuple[TimeSlot, ...],
+        time_slots: tuple[TimeSlot, ...] | None = None,
         max_solve_seconds: float = 10.0,
     ) -> GenerateScheduleResult:
         schedule = self._require_schedule(schedule_id)
         data = self._data.load()
         _require_complete_scheduling_data(data)
+        if time_slots is None:
+            time_slots = build_standard_time_slots()
         problem = build_scheduling_problem(
             data, time_slots, min(max_solve_seconds, self._max_solve_seconds)
         )
@@ -237,6 +254,14 @@ class SchedulingService:
             latest_draft_version_id=draft.id if draft else None,
             published_version_id=published.id if published else None,
         )
+
+    def get_current_demo_schedule(self) -> ScheduleSummary:
+        """Return the newest logical schedule used by the single-school demo."""
+
+        schedule = self._schedules.get_current_schedule()
+        if schedule is None:
+            raise ScheduleNotFoundError("no demo schedule exists")
+        return self.get_schedule(schedule.id)
 
     def get_schedule_version(
         self, version_id: int, schedule_id: int | None = None

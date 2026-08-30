@@ -255,6 +255,22 @@ def test_complete_schedule_api_workflow(
     }
 
 
+def test_generate_draft_uses_standard_slots_when_omitted(
+    api_context: tuple[TestClient, Session],
+) -> None:
+    client, _ = api_context
+    schedule_id = _create_schedule(client, "Default slots")
+
+    response = client.post(
+        f"/schedules/{schedule_id}/drafts",
+        json={"max_solve_seconds": 2},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["solver_status"] in {"FEASIBLE", "OPTIMAL"}
+    assert response.json()["version"]["lessons"]
+
+
 @pytest.mark.parametrize(
     "path",
     (

@@ -3,21 +3,15 @@
 ## Core Application
 
 ```text
-       Browser
-        |
-        v
-      Demo UI
-        |
-        v
-     FastAPI ----------+
-                       |
-Future MCP Server ------+--> Application Services
-                              /          \
-                             v            v
-                       Repositories    Scheduler interface
-                             |            |
-                             v            v
-                        PostgreSQL    CP-SAT engine
+Browser/UI ---> FastAPI --------------------+
+                                             |
+User ---> AI Harness                         +--> Application Services
+           +-- LLM Provider                  |          /       \
+           +-- MCP Client                    |         v         v
+                 |                           |   Repositories   CP-SAT
+                 v                           |         |
+           School MCP Server ----------------+         v
+                                                   PostgreSQL
 ```
 
 Application services own orchestration and transaction boundaries. Repositories
@@ -26,15 +20,16 @@ The scheduler interface accepts and returns in-memory DTOs and contains no
 database logic. PostgreSQL is the source of truth for application state, while
 the OR-Tools CP-SAT scheduler is the authoritative scheduling engine. Future
 API, MCP, and UI adapters must call application services rather than database or
-solver internals.
+solver internals. FastAPI and MCP are parallel adapters over the same service
+capabilities.
 
 FastAPI is a presentation adapter. Routes validate public request schemas, call
 application services, and translate service outcomes to HTTP responses; they do
 not query SQLAlchemy or construct CP-SAT models directly. Read-only school-data
 queries also pass through a dedicated application service. Database sessions
 are request-scoped dependencies, while schedule generation and publication
-transactions remain owned by the scheduling application service. Future MCP
-tools will use these same services in parallel with FastAPI.
+transactions remain owned by the scheduling application service. MCP tools use
+these same services in parallel with FastAPI.
 
 The demo UI is a separately built React/TypeScript application. Its typed API
 client is the only browser-side capability boundary: components do not query
@@ -59,7 +54,7 @@ only FastAPI connects to PostgreSQL over Railway private networking. Alembic is
 the production schema authority and runs before a backend deployment starts.
 Neither API startup nor demo seeding creates, drops, or resets schema objects.
 
-## Planned AI Integration
+## AI and MCP Integration
 
 ```text
 AI Harness
@@ -74,19 +69,51 @@ AI Harness
             +-- School MCP Server
                   |
                   +-- Application Services
-                  +-- CP-SAT
-                  +-- RAG
+                        /          \
+                       v            v
+                 Repositories    CP-SAT
 ```
 
-The AI harness will access language models through a provider abstraction. Ollama is the initial provider; OpenAI and OpenAI-compatible local servers such as vLLM may be added later.
+The AI harness accesses Ollama or OpenAI through a small provider interface and
+uses a replaceable MCP client. The first client runs in-process, while the same
+approved tool functions can be registered with the official MCP SDK server.
+This keeps protocol transport separate from application capabilities.
 
-The School MCP Server will expose application capabilities to AI agents. Its adapters will delegate to application services and contain no core business logic. RAG will be limited to unstructured policies and documents. The LLM may assist users and propose inputs, but it will never generate the final timetable; final schedules remain the responsibility of CP-SAT.
+The MCP adapter delegates only to `SchoolDataService` and `SchedulingService`;
+it has no SQLAlchemy session, SQL, repository, or CP-SAT construction logic.
+Nine read tools expose school/schedule data, current-demo schedule discovery,
+and comparison. The sole write tool asks the scheduling service to create a
+CP-SAT-backed `DRAFT`. The service resolves an omitted schedule ID to the newest
+logical demo schedule and owns the standard candidate time-slot grid. No publish
+tool is registered. A user must publish separately through the existing REST/UI
+flow.
+
+The harness executes a bounded loop of at most four allow-listed tool calls,
+validates every tool name and argument payload, and asks the provider to
+summarize structured results. A deterministic FakeProvider supports tests with
+no network or credentials; Ollama is the local real-model option, while the
+OpenAI adapter is configured only when explicitly selected. Solver `INFEASIBLE`
+or `UNKNOWN` outcomes bypass model summarization and produce a deterministic
+no-draft response, preventing fabricated success. Arbitrary tool names,
+additional tool calls, SQL access, direct lesson edits, constraint changes, and
+autonomous publishing are rejected by construction. RAG remains a future layer
+for unstructured policy documents only.
+
+Ollama attempts its native function-call format first. When a model returns no
+native call, the adapter makes a schema-constrained fallback request using the
+same provider-neutral `ProviderTurn` JSON contract, temperature zero, strict
+Pydantic validation, and no dynamic code execution. Only tools relevant to the
+current request are sent when they can be identified cheaply. Full lesson lists
+remain in the structured API result but are reduced to counts in the model's
+summarization context.
 
 ## Source Layout
 
 - `src/school_ai/database/` contains persistence-related components.
 - `src/school_ai/services/` contains application services.
 - `src/school_ai/solver/` contains scheduling and optimization components.
+- `src/school_ai/ai/` contains provider-neutral harness orchestration.
+- `src/school_ai/mcp/` contains the approved service adapter and MCP client/server boundaries.
 
 ## Scheduling Engine
 

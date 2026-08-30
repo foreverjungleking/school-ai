@@ -17,8 +17,9 @@ The current implementation provides:
 - pytest coverage using an in-memory SQLite database
 
 The FastAPI application exposes read-only school data, the complete schedule
-draft/version/publication workflow, and a first controlled AI harness over an
-approved MCP tool surface. The React UI does not include chat yet.
+draft/version/publication workflow, and a controlled AI harness over an
+approved MCP tool surface. The React demo includes an AI Assistant page that
+uses that harness without bypassing the normal schedule review workflow.
 
 ## Schedule lifecycle
 
@@ -167,6 +168,13 @@ no publish tool: users must review and publish drafts through the existing
 API/UI. `INFEASIBLE` and `UNKNOWN` solver outcomes are reported as failures and
 never converted into a timetable.
 
+The frontend AI Assistant sends typed requests to `POST /ai/chat` through the
+same FastAPI base URL as the rest of the UI. It shows approved tool activity,
+provider errors, and links a successfully generated draft to the existing
+Versions review screen. It does not call Ollama or OpenAI from the browser and
+does not add a publish capability. Suggested prompts omit schedule IDs so the
+backend can resolve the current demo schedule through application services.
+
 Select a provider through environment variables. The application does not
 construct a provider during startup, so the deterministic API/UI remains
 available when AI variables are absent. For deterministic, network-free local
@@ -192,6 +200,10 @@ export OLLAMA_MODEL=qwen2.5:3b
 export DATABASE_URL=<your-local-database-url>
 uvicorn school_ai.api.app:app --host 127.0.0.1 --port 8000
 ```
+
+Run the frontend normally with `VITE_API_BASE_URL` pointing to FastAPI. The
+request path remains Browser → FastAPI → Ollama; never configure the browser to
+contact port 11434 directly.
 
 Before the smoke test, run `alembic upgrade head` and
 `python -m school_ai.demo_seed` against that `DATABASE_URL`. Create a logical
@@ -242,7 +254,7 @@ curl -X POST http://127.0.0.1:8000/ai/chat \
   -d '{"message":"Show me the published schedule for schedule 1"}'
 ```
 
-This first milestone performs at most four sequential approved tool calls per
+The harness performs at most four sequential approved tool calls per
 chat request and uses an in-process MCP client boundary; the same tools can be
 registered on the official MCP Python SDK server for a future external
 transport. Each requested name and its arguments are validated before
@@ -250,5 +262,9 @@ execution. Draft
 generation accepts an optional schedule ID and always obtains candidate slots
 from the scheduling service. Ollama uses native tools first and falls back to a
 strict Pydantic-validated JSON response schema; malformed JSON fails safely.
-There is no UI chat, conversation memory, authentication,
-streaming, RAG, autonomous publication, or multi-agent orchestration yet.
+The UI limits message length and disables duplicate submission while a request
+is running. These are usability controls, not security controls. There is no
+user authentication, per-user session ownership, persistent conversation
+memory, server-side AI rate limiting, streaming, RAG, autonomous publication,
+or multi-agent orchestration yet. Server-side rate limiting and session
+isolation are required before broad public AI exposure.

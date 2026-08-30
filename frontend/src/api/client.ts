@@ -1,5 +1,7 @@
 import type {
   Activity,
+  AIChatRequest,
+  AIChatResponse,
   GenerateDraftResult,
   Room,
   Schedule,
@@ -79,4 +81,12 @@ export const schedulesApi = {
     request<ScheduleComparison>(
       `/schedules/${scheduleId}/compare?from_version_id=${fromVersionId}&to_version_id=${toVersionId}`,
     ),
+};
+
+export const aiApi = {
+  chat: (payload: AIChatRequest) =>
+    request<AIChatResponse>("/ai/chat", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 };

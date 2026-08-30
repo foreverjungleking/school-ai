@@ -38,6 +38,15 @@ comparison rules. FastAPI remains responsible for public validation and HTTP
 mapping, while application services remain responsible for scheduling,
 persistence transactions, publication, and comparison.
 
+The AI Assistant is a dedicated, non-dominant UI screen. It calls only the
+typed FastAPI `POST /ai/chat` client and displays the returned assistant text
+and approved tool-execution summary. A successful draft response triggers a
+fresh read of the affected schedule/version state and links to the existing
+Versions screen; publication is never offered through chat. Provider failure
+is isolated to the assistant screen, so deterministic scheduling remains
+usable. Browser code never connects directly to an LLM provider or receives
+provider credentials.
+
 The browser prepares a standard weekday/hour candidate-slot template for the
 existing draft-generation endpoint. CP-SAT remains authoritative about whether
 those inputs produce a valid timetable. `INFEASIBLE` and `UNKNOWN` responses are
@@ -106,6 +115,13 @@ Pydantic validation, and no dynamic code execution. Only tools relevant to the
 current request are sent when they can be identified cheaply. Full lesson lists
 remain in the structured API result but are reduced to counts in the model's
 summarization context.
+
+Chat requests are currently independent: neither the browser nor backend owns
+persistent conversation history. The public demo also has no authentication,
+per-user schedule ownership, session isolation, or server-side AI rate limit.
+Client message limits and in-flight submission locking prevent accidental UX
+repeats only; rate limiting and session isolation are required before broad
+public AI exposure.
 
 ## Source Layout
 

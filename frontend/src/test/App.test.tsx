@@ -26,6 +26,20 @@ test("renders the application shell and dashboard summary", async () => {
   expect(screen.getByText("School AI")).toBeInTheDocument();
   expect(await screen.findByRole("heading", { name: "Make the school week fit." })).toBeInTheDocument();
   expect(screen.getByText("Available educators").previousSibling).toHaveTextContent("1");
+  expect(screen.getByRole("button", { name: /AI Assistant/ })).toBeInTheDocument();
+});
+
+test("opens the AI Assistant without disrupting the scheduling screens", async () => {
+  const user = userEvent.setup();
+  mockInitialData();
+  render(<App />);
+
+  await user.click(await screen.findByRole("button", { name: /AI Assistant/ }));
+
+  expect(screen.getByRole("heading", { name: "AI Assistant" })).toBeInTheDocument();
+  expect(screen.getByText("Cannot publish schedules")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: /Overview/ }));
+  expect(screen.getByRole("heading", { name: "Make the school week fit." })).toBeInTheDocument();
 });
 
 test("shows a useful API connectivity error", async () => {

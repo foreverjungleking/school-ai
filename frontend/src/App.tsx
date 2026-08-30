@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError, schedulesApi, schoolDataApi } from "./api/client";
 import { AppShell, type Screen } from "./components/AppShell";
+import { AIAssistant } from "./components/AIAssistant";
 import { Dashboard } from "./components/Dashboard";
 import { SchoolDataTables } from "./components/SchoolDataTables";
 import { Timetable } from "./components/Timetable";
@@ -103,6 +104,12 @@ export function App() {
     finally { setComparing(false); }
   };
 
+  const refreshAIDraft = async (scheduleId: number, versionId: number) => {
+    window.localStorage.setItem(storageKey, String(scheduleId));
+    await refreshSchedule(scheduleId, versionId);
+    setNotice("The AI Assistant created a draft with CP-SAT. Review it before publishing.");
+  };
+
   const latestDraft = useMemo(() => [...versions].reverse().find((item) => item.status === "DRAFT") ?? null, [versions]);
   return (
     <AppShell screen={screen} onNavigate={setScreen} apiOnline={!error || data.teachers.length > 0}>
@@ -114,6 +121,7 @@ export function App() {
           {screen === "data" && <SchoolDataTables data={data} />}
           {screen === "timetable" && <Timetable version={selectedVersion} data={data} />}
           {screen === "versions" && <Versions schedule={schedule} versions={versions} comparison={comparison} publishingId={publishingId} comparing={comparing} onSelect={(version) => { setSelectedVersion(version); setScreen("timetable"); }} onPublish={(version) => void publish(version)} onCompare={(from, to) => void compare(from, to)} data={data} />}
+          {screen === "assistant" && <AIAssistant onDraftCreated={refreshAIDraft} onReviewDraft={() => setScreen("versions")} />}
         </div>
       )}
     </AppShell>

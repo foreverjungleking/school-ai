@@ -94,3 +94,27 @@ export type SchoolData = {
   groups: StudentGroup[];
   activities: Activity[];
 };
+
+export type AIToolCall = {
+  name: string;
+  arguments: Record<string, unknown>;
+  success: boolean;
+  result: unknown;
+  error: string | null;
+};
+
+export type AIChatRequest = { message: string };
+
+export type AIChatResponse = {
+  assistant_text: string;
+  tool_calls: AIToolCall[];
+  metadata: {
+    provider?: string;
+    tool_iterations?: number;
+    draft_created?: boolean;
+    schedule_id?: number;
+    version_id?: number;
+    solver_status?: SolverStatus;
+    [key: string]: unknown;
+  };
+};

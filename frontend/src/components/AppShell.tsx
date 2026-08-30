@@ -1,12 +1,13 @@
 import type { ReactNode } from "react";
 
-export type Screen = "dashboard" | "data" | "timetable" | "versions";
+export type Screen = "dashboard" | "data" | "timetable" | "versions" | "assistant";
 
 const items: { id: Screen; label: string; icon: string }[] = [
   { id: "dashboard", label: "Overview", icon: "◫" },
   { id: "data", label: "School data", icon: "◎" },
   { id: "timetable", label: "Timetable", icon: "▦" },
   { id: "versions", label: "Versions", icon: "⇄" },
+  { id: "assistant", label: "AI Assistant", icon: "✦" },
 ];
 
 export function AppShell({

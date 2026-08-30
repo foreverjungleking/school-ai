@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from school_ai.ai.harness import AIHarness, HarnessError
-from school_ai.ai.models import ProviderTurn, ToolCall
+from school_ai.ai.models import ChatMessage, ProviderTurn, ToolCall, ToolDefinition
 from school_ai.ai.providers.fake import FakeProvider
 from school_ai.ai.providers.factory import create_provider
 from school_ai.ai.providers.base import ProviderConfigurationError, ProviderResponseError
@@ -327,6 +327,32 @@ def test_ollama_parses_provider_neutral_json_tool_response(monkeypatch) -> None:
     )
 
     assert turn.tool_calls == (ToolCall(name="list_teachers"),)
+
+
+def test_ollama_accepts_plain_summary_after_tool_result(monkeypatch) -> None:
+    _OllamaClient.response = _OllamaResponse(
+        {"content": "Daniel Tan and Aisha Rahman are available."}
+    )
+    monkeypatch.setattr(
+        "school_ai.ai.providers.ollama.httpx.AsyncClient", _OllamaClient
+    )
+
+    turn = asyncio.run(
+        OllamaProvider("http://localhost:11434", "test-model").generate(
+            (ChatMessage(role="tool", content='{"success": true}'),),
+            (
+                ToolDefinition(
+                    name="list_teachers",
+                    description="List teachers.",
+                    input_schema={"type": "object", "properties": {}},
+                ),
+            ),
+        )
+    )
+
+    assert turn == ProviderTurn(
+        text="Daniel Tan and Aisha Rahman are available."
+    )
 
 
 def test_ollama_rejects_malformed_structured_response(monkeypatch) -> None:

@@ -45,7 +45,10 @@ class OllamaProvider:
                 try:
                     return ProviderTurn.model_validate_json(content)
                 except ValueError:
-                    pass
+                    if content.strip() and any(
+                        item.role == "tool" for item in messages
+                    ):
+                        return ProviderTurn(text=content)
 
             protocol = _JSON_PROTOCOL
             if tools:

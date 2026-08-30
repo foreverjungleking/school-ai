@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 from unittest.mock import Mock
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -352,6 +353,207 @@ def test_ollama_accepts_plain_summary_after_tool_result(monkeypatch) -> None:
 
     assert turn == ProviderTurn(
         text="Daniel Tan and Aisha Rahman are available."
+    )
+
+
+class _OpenAIClient:
+    responses: list[httpx.Response]
+    requests: list[dict[str, Any]] = []
+
+    def __init__(self, **kwargs: Any) -> None:
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        pass
+
+    async def post(self, url: str, **kwargs: Any) -> httpx.Response:
+        self.requests.append({"url": url, **kwargs})
+        response = self.responses.pop(0)
+        response.request = httpx.Request("POST", url)
+        return response
+
+
+def _mock_openai(monkeypatch, *responses: httpx.Response) -> None:
+    _OpenAIClient.responses = list(responses)
+    _OpenAIClient.requests = []
+    monkeypatch.setattr(
+        "school_ai.ai.providers.openai.httpx.AsyncClient", _OpenAIClient
+    )
+
+
+def test_openai_parses_normal_responses_api_text(monkeypatch) -> None:
+    _mock_openai(
+        monkeypatch,
+        httpx.Response(
+            200,
+            json={
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {"type": "output_text", "text": "One teacher."}
+                        ],
+                    }
+                ]
+            },
+        ),
+    )
+
+    turn = asyncio.run(OpenAIProvider("test-key", "gpt-5-mini").generate((), ()))
+
+    assert turn == ProviderTurn(text="One teacher.")
+
+
+def test_openai_parses_responses_api_function_call(monkeypatch) -> None:
+    _mock_openai(
+        monkeypatch,
+        httpx.Response(
+            200,
+            json={
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "list_teachers",
+                        "arguments": "{}",
+                        "call_id": "call_123",
+                    }
+                ]
+            },
+        ),
+    )
+
+    turn = asyncio.run(OpenAIProvider("test-key", "gpt-5-mini").generate((), ()))
+
+    assert turn == ProviderTurn(tool_calls=(ToolCall(name="list_teachers"),))
+
+
+@pytest.mark.parametrize(
+    ("status", "public_message"),
+    [
+        (400, "rejected the request"),
+        (401, "authentication failed"),
+        (429, "rate limit or quota exceeded"),
+    ],
+)
+def test_openai_logs_safe_api_error_diagnostics(
+    monkeypatch, caplog, status: int, public_message: str
+) -> None:
+    _mock_openai(
+        monkeypatch,
+        httpx.Response(
+            status,
+            json={
+                "error": {
+                    "message": "sensitive provider detail",
+                    "type": "invalid_request_error",
+                    "code": "invalid_tool_schema",
+                    "param": "tools[0].parameters",
+                }
+            },
+        ),
+    )
+
+    with pytest.raises(ProviderResponseError, match=public_message):
+        asyncio.run(
+            OpenAIProvider("secret-test-key", "gpt-5-mini").generate((), ())
+        )
+
+    assert f"status={status}" in caplog.text
+    assert "error_type=invalid_request_error" in caplog.text
+    assert "error_code=invalid_tool_schema" in caplog.text
+    assert "error_param=tools[0].parameters" in caplog.text
+    assert "secret-test-key" not in caplog.text
+    assert "sensitive provider detail" not in caplog.text
+
+
+def test_openai_rejects_malformed_json_response(monkeypatch) -> None:
+    _mock_openai(
+        monkeypatch,
+        httpx.Response(200, content=b"not-json"),
+    )
+
+    with pytest.raises(ProviderResponseError, match="invalid response"):
+        asyncio.run(OpenAIProvider("test-key", "gpt-5-mini").generate((), ()))
+
+
+def test_openai_sends_non_strict_function_tools(monkeypatch) -> None:
+    school_data, scheduling = _services()
+    definitions = SchoolMCPServer(school_data, scheduling).tool_definitions
+    _mock_openai(monkeypatch, httpx.Response(200, json={"output": []}))
+
+    asyncio.run(
+        OpenAIProvider("test-key", "gpt-5-mini").generate((), definitions)
+    )
+
+    payload = _OpenAIClient.requests[0]["json"]
+    assert payload["model"] == "gpt-5-mini"
+    assert payload["tool_choice"] == "auto"
+    assert payload["parallel_tool_calls"] is False
+    assert {tool["name"] for tool in payload["tools"]} == {
+        tool.name for tool in definitions
+    }
+    assert all(tool["strict"] is False for tool in payload["tools"])
+
+
+def test_openai_two_turn_list_teachers_flow_executes_one_tool(monkeypatch) -> None:
+    school_data, scheduling = _services()
+    _mock_openai(
+        monkeypatch,
+        httpx.Response(
+            200,
+            json={
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "list_teachers",
+                        "arguments": "{}",
+                        "call_id": "call_123",
+                    }
+                ]
+            },
+        ),
+        httpx.Response(
+            200,
+            json={
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": "The teacher is Ms Lim.",
+                            }
+                        ],
+                    }
+                ]
+            },
+        ),
+    )
+
+    result = asyncio.run(
+        AIHarness(
+            OpenAIProvider("test-key", "gpt-5-mini"),
+            _client(school_data, scheduling),
+        ).chat("List the teachers.")
+    )
+
+    assert result.assistant_text == "The teacher is Ms Lim."
+    assert [execution.name for execution in result.tool_calls] == ["list_teachers"]
+    school_data.list_teachers.assert_called_once_with()
+    assert len(_OpenAIClient.requests) == 2
+    first_payload = _OpenAIClient.requests[0]["json"]
+    assert [tool["name"] for tool in first_payload["tools"]] == ["list_teachers"]
+    assert first_payload["tools"][0]["strict"] is False
+    second_input = _OpenAIClient.requests[1]["json"]["input"]
+    assert any(
+        item["role"] == "user"
+        and item["content"].startswith("Tool result: ")
+        and '"name": "list_teachers"' in item["content"]
+        and '"Ms Lim"' in item["content"]
+        for item in second_input
     )
 
 

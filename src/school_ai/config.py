@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass, field
 
 from school_ai.database.session import get_database_url
+from school_ai.ai.context import ContextSettings
 
 _LOCAL_CORS_ORIGINS = (
     "http://localhost:3000",
@@ -22,6 +23,7 @@ class Settings:
     database_url: str = field(default_factory=get_database_url)
     allowed_cors_origins: tuple[str, ...] = _LOCAL_CORS_ORIGINS
     max_solve_seconds: float = 15.0
+    ai_context: ContextSettings = field(default_factory=ContextSettings)
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -41,6 +43,11 @@ class Settings:
             database_url=get_database_url(),
             allowed_cors_origins=origins,
             max_solve_seconds=_positive_float("MAX_SOLVE_SECONDS", 15.0),
+            ai_context=ContextSettings(
+                max_bytes=int(os.getenv("AI_CONTEXT_MAX_BYTES", "48000")),
+                summary_bytes=int(os.getenv("AI_SUMMARY_MAX_BYTES", "4000")),
+                recent_turns=int(os.getenv("AI_RECENT_TURNS", "3")),
+            ),
         )
 
 

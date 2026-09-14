@@ -18,6 +18,7 @@ from school_ai.services.dto import (
     GenerateScheduleResult,
     LessonChange,
     ScheduleSummary,
+    ScheduleLessonPage,
     ScheduledLessonView,
     ScheduleVersionComparison,
     ScheduleVersionView,
@@ -280,6 +281,33 @@ class SchedulingService:
                 f"schedule {schedule_id} has no published version"
             )
         return _version_view(version)
+
+    def get_schedule_lessons(
+        self, schedule_id: int | None = None, version_id: int | None = None,
+        weekday: int | None = None, student_group_id: int | None = None,
+        teacher_id: int | None = None, room_id: int | None = None,
+        offset: int = 0, limit: int = 20,
+    ) -> ScheduleLessonPage:
+        """Read an explicit snapshot or current publication with bounded filters."""
+        if not 0 <= offset <= 10000 or not 1 <= limit <= 20:
+            raise ValueError("invalid lesson pagination")
+        if weekday is not None and not 0 <= weekday <= 6:
+            raise ValueError("invalid weekday")
+        if schedule_id is None:
+            schedule_id = self.get_current_demo_schedule().id
+        version = (self.get_schedule_version(version_id, schedule_id)
+                   if version_id is not None else self.get_published_schedule_version(schedule_id))
+        matched = sorted((lesson for lesson in version.lessons
+            if all(value is None or getattr(lesson, field) == value for field, value in (
+                ("weekday", weekday), ("student_group_id", student_group_id),
+                ("teacher_id", teacher_id), ("room_id", room_id),
+            ))), key=lambda lesson: (lesson.weekday, lesson.start_time, lesson.id))
+        return ScheduleLessonPage(
+            schedule_id=schedule_id, version_id=version.id, version_number=version.version_number,
+            status=version.status, matched_count=len(matched),
+            next_offset=offset + limit if offset + limit < len(matched) else None,
+            lessons=tuple(matched[offset:offset + limit]),
+        )
 
     def list_schedule_versions(
         self, schedule_id: int

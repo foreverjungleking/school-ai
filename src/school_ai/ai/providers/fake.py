@@ -13,8 +13,9 @@ class FakeProvider:
 
     name = "fake"
 
-    def __init__(self, *turns: ProviderTurn | dict[str, Any]) -> None:
+    def __init__(self, *turns: ProviderTurn | dict[str, Any], repeat_last: bool = False) -> None:
         self._turns = list(turns)
+        self._repeat_last = repeat_last
         self.calls: list[tuple[tuple[ChatMessage, ...], tuple[ToolDefinition, ...]]] = []
 
     async def generate(
@@ -26,6 +27,8 @@ class FakeProvider:
         if not self._turns:
             raise ProviderResponseError("FakeProvider has no scripted response left")
         try:
-            return ProviderTurn.model_validate(self._turns.pop(0))
+            return ProviderTurn.model_validate(
+                self._turns[0] if self._repeat_last and len(self._turns) == 1 else self._turns.pop(0)
+            )
         except (ValidationError, TypeError) as exc:
             raise ProviderResponseError("FakeProvider scripted response is invalid") from exc

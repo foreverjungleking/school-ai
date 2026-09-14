@@ -12,7 +12,8 @@ def create_provider() -> LLMProvider:
     provider = os.getenv("AI_PROVIDER", "").strip().lower()
     if provider == "fake":
         return FakeProvider(
-            {"text": "FakeProvider is configured; no tool response was scripted."}
+            {"text": "FakeProvider is configured; no tool response was scripted."},
+            repeat_last=True,
         )
     if provider == "ollama":
         model = os.getenv("OLLAMA_MODEL", "").strip()

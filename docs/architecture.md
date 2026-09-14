@@ -88,9 +88,10 @@ uses a replaceable MCP client. The first client runs in-process, while the same
 approved tool functions can be registered with the official MCP SDK server.
 This keeps protocol transport separate from application capabilities.
 
-The MCP adapter delegates only to `SchoolDataService` and `SchedulingService`;
+The MCP adapter delegates to `SchoolDataService`, `SchedulingService`, and
+`PolicyService`;
 it has no SQLAlchemy session, SQL, repository, or CP-SAT construction logic.
-Nine read tools expose school/schedule data, current-demo schedule discovery,
+Eleven read tools expose school/schedule data, current-demo schedule discovery,
 and comparison. The sole write tool asks the scheduling service to create a
 CP-SAT-backed `DRAFT`. The service resolves an omitted schedule ID to the newest
 logical demo schedule and owns the standard candidate time-slot grid. No publish
@@ -105,23 +106,25 @@ OpenAI adapter is configured only when explicitly selected. Solver `INFEASIBLE`
 or `UNKNOWN` outcomes bypass model summarization and produce a deterministic
 no-draft response, preventing fabricated success. Arbitrary tool names,
 additional tool calls, SQL access, direct lesson edits, constraint changes, and
-autonomous publishing are rejected by construction. RAG remains a future layer
-for unstructured policy documents only.
+autonomous publishing are rejected by construction. RAG retrieves versioned
+unstructured policy excerpts from PostgreSQL; structured
+school and timetable facts remain service-backed tool reads.
 
 Ollama attempts its native function-call format first. When a model returns no
 native call, the adapter makes a schema-constrained fallback request using the
 same provider-neutral `ProviderTurn` JSON contract, temperature zero, strict
 Pydantic validation, and no dynamic code execution. Only tools relevant to the
 current request are sent when they can be identified cheaply. Full lesson lists
-remain in the structured API result but are reduced to counts in the model's
-summarization context.
+remain in the structured API result but use counts and bounded previews in the
+model context. Filtered lesson pages are available through `get_schedule_lessons`.
 
-Chat requests are currently independent: neither the browser nor backend owns
-persistent conversation history. The public demo also has no authentication,
-per-user schedule ownership, session isolation, or server-side AI rate limit.
-Client message limits and in-flight submission locking prevent accidental UX
-repeats only; rate limiting and session isolation are required before broad
-public AI exposure.
+Chat requests optionally belong to token-owned conversations. PostgreSQL stores
+original exchanges and bounded provider-generated summaries; the browser
+restores history using a private token, whose hash is stored server-side.
+Atomic leases and revision checks serialize turns across processes. Summary
+and history data are untrusted context. Conversations do not provide account
+authentication or ownership of the shared demo timetable. Public server-side
+rate limiting and schedule isolation remain separate requirements.
 
 ## Source Layout
 
@@ -135,7 +138,7 @@ public AI exposure.
 
 The solver accepts validated, in-memory DTOs and has no dependency on database
 sessions or web frameworks. Candidate assignments are represented by optional
-fixed CP-SAT intervals. Required sessions select exactly one candidate, and
+fixed CP-SAT intervals. Each activity selects its required number of candidates, and
 teacher, student-group, and room calendars each use hard `NoOverlap`
 constraints. Availability and room suitability are enforced when candidates
 are created; constraints are never relaxed to obtain a result.
@@ -190,3 +193,47 @@ The explicit, idempotent `school_ai.demo_seed` utility adds deterministic
 synthetic school resources only after migrations have been applied. It is an
 infrastructure/demo helper outside the solver and service business logic,
 preserves a fully seeded database, and refuses partially populated datasets.
+
+## Weekly distribution objective
+
+The solver now optimizes soft preferences after enforcing all resource,
+availability, room suitability, and weekly session-count constraints. Its
+objective sums each group's maximum-minus-minimum daily teaching minutes over
+candidate weekdays, plus each activity's repeated daily sessions beyond the
+first multiplied by that activity's duration. Both components have equal weight
+in minutes. A score of zero means equal daily loads and no repeated subject
+within a day; it is not a measure of every aspect of school timetable quality.
+Restricted availability can legitimately require a positive score. `FEASIBLE`
+means the time limit allowed a valid solution without proving optimality.
+
+There is one optional interval per activity/slot/room candidate, and exactly
+`sessions_per_week` candidates are selected per activity. Interchangeable
+session numbers are assigned chronologically after solving, avoiding equivalent
+permutations in the search. This preserves the hard no-overlap rules and makes
+larger weekly demo problems practical with a single search worker. Comparisons
+with older versions may reflect the old solver's arbitrary session numbering.
+
+The expanded synthetic seed models 25 lessons per class per week and protects
+lunch through structured teacher/room availability. The explicit `--expand`
+operation updates known demo master data while preserving stored lesson
+snapshots; it does not publish or rewrite a timetable version.
+
+## Conversation context and policy retrieval
+
+`ConversationService` owns short PostgreSQL transactions for access checks,
+turn leases, history, and summary commits. `ConversationRepository` implements
+persistence only. `AIHarness` builds bounded context and calls the same provider
+abstraction for replies; compression also uses that abstraction, with no tools
+available during summarization. Provider outages preserve valid memory.
+
+`PolicyService` ingests local synthetic Markdown, chunks it by section, retains
+content versions, and ranks matching excerpts. `PolicyRepository` queries only
+current versions, using PostgreSQL full-text candidate retrieval (SQLite lexical
+fallback for tests). `search_school_policies` is a thin MCP adapter. The UI
+renders sources from tool metadata rather than trusting model-generated links.
+
+`get_schedule_lessons` delegates filtering and pagination to the scheduling
+service, allowing precise assignment reads without including full timetable
+snapshots in every prompt. The LLM cannot change constraints or publish through
+these tools. See [AI context and RAG](ai-context-plan.md) for protocol, budget,
+retention, concurrency, and failure semantics.

@@ -47,6 +47,16 @@ class ScheduleVersionView(ServiceModel):
     lessons: tuple[ScheduledLessonView, ...]
 
 
+class ScheduleLessonPage(ServiceModel):
+    schedule_id: int
+    version_id: int
+    version_number: int
+    status: ScheduleVersionStatus
+    matched_count: int
+    next_offset: int | None
+    lessons: tuple[ScheduledLessonView, ...]
+
+
 class GenerateScheduleResult(ServiceModel):
     solver_status: SolveStatus
     solve_duration_seconds: float

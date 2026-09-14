@@ -137,6 +137,8 @@ def test_official_mcp_server_exposes_only_approved_tools() -> None:
     names = {item.name for item in asyncio.run(sdk_server.list_tools())}
 
     assert names == {
+        "get_schedule_lessons",
+        "search_school_policies",
         "list_teachers",
         "list_rooms",
         "list_student_groups",
@@ -671,3 +673,16 @@ def test_ai_chat_runs_with_fake_provider_and_no_credentials(monkeypatch) -> None
             "draft_created": False,
         },
     }
+
+
+def test_empty_summary_after_draft_preserves_successful_action():
+    school_data, scheduling = _services()
+    provider = FakeProvider(
+        ProviderTurn(tool_calls=(ToolCall(name="create_schedule_draft", arguments={"schedule_id": 7}),)),
+        ProviderTurn(text=""),
+    )
+    result = asyncio.run(AIHarness(provider, _client(school_data, scheduling)).chat("Generate a draft"))
+    assert result.metadata["draft_created"] is True
+    assert result.metadata["version_id"] == 11
+    assert "no summary" in result.assistant_text
+    scheduling.generate_schedule_draft.assert_called_once()

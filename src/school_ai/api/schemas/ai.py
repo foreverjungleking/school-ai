@@ -1,12 +1,14 @@
 """Public AI harness request and response contracts."""
 
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
 
 class AIChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
+    conversation_id: UUID | None = None
 
 
 class AIToolCallResponse(BaseModel):

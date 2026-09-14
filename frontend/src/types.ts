@@ -103,13 +103,25 @@ export type AIToolCall = {
   error: string | null;
 };
 
-export type AIChatRequest = { message: string };
+export type AIChatRequest = { message: string; conversation_id?: string };
+export type ConversationCredential = { id: string; access_token: string };
+export type PolicySource = {
+  citation_id: string; source: string; title: string; section: string;
+  version: string; excerpt: string;
+};
+export type ConversationHistory = {
+  id: string; revision: number; memory_compressed: boolean; earlier_turns: number;
+  turns: { sequence: number; user_text: string; response: AIChatResponse }[];
+};
 
 export type AIChatResponse = {
   assistant_text: string;
   tool_calls: AIToolCall[];
   metadata: {
     provider?: string;
+    sources?: PolicySource[];
+    memory_compressed?: boolean;
+    compression_failed?: boolean;
     tool_iterations?: number;
     draft_created?: boolean;
     schedule_id?: number;

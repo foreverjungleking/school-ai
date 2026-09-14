@@ -86,7 +86,7 @@ def test_feasible_schedule_returns_structured_result(
     assert result.status is SolveStatus.OPTIMAL
     assert len(result.assignments) == 2
     assert result.solve_duration_seconds >= 0
-    assert result.objective_value is None
+    assert result.objective_value == 0
     assert result.metadata["candidate_count"] > 0
     assert result.metadata["solver_status"] == "OPTIMAL"
 
@@ -671,3 +671,32 @@ def test_result_rejects_non_finite_duration() -> None:
             status=SolveStatus.UNKNOWN,
             solve_duration_seconds=float("nan"),
         )
+
+
+def test_weekly_lessons_spread_across_days(feasible_problem: SchedulingProblem) -> None:
+    slots = tuple(TimeSlot(id=day * 3 + hour + 1, weekday=day,
+                          start_time=time(8 + hour), end_time=time(9 + hour))
+                  for day in range(5) for hour in range(3))
+    problem = feasible_problem.model_copy(update={
+        "activities": (_activity(1, teacher_id=1, student_group_id=1, sessions_per_week=5),),
+        "time_slots": slots,
+    })
+    result = solve(problem)
+    assert result.status is SolveStatus.OPTIMAL
+    assert Counter(item.weekday for item in result.assignments) == dict.fromkeys(range(5), 1)
+    assert result.objective_value == 0
+
+
+def test_spreading_is_soft_when_only_one_day_is_available(feasible_problem: SchedulingProblem) -> None:
+    problem = feasible_problem.model_copy(update={
+        "activities": (_activity(1, teacher_id=1, student_group_id=1, sessions_per_week=2),),
+        "teachers": (TeacherInput(id=1, availability=(AvailabilityWindow(
+            weekday=0, start_time=time(8), end_time=time(10)),)),),
+        "time_slots": (*feasible_problem.time_slots,
+                       TimeSlot(id=3, weekday=1, start_time=time(8), end_time=time(9))),
+    })
+    result = solve(problem)
+    assert result.status is SolveStatus.OPTIMAL
+    assert len(result.assignments) == 2
+    assert {item.weekday for item in result.assignments} == {0}
+    assert result.objective_value > 0

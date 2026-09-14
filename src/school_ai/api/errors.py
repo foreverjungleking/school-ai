@@ -16,6 +16,7 @@ from school_ai.services.scheduling import (
     SchedulingDataIncompleteError,
 )
 from school_ai.solver import SolveStatus
+from school_ai.services.conversations import ConversationNotFoundError, ConversationBusyError
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,18 @@ def _error(status_code: int, code: str, message: str) -> JSONResponse:
 
 
 def register_error_handlers(app: FastAPI) -> None:
+    @app.exception_handler(ConversationNotFoundError)
+    async def conversation_missing(request: Request, exc: ConversationNotFoundError) -> JSONResponse:
+        return _error(404, "CONVERSATION_NOT_FOUND", str(exc))
+
+    @app.exception_handler(ConversationBusyError)
+    async def conversation_busy(request: Request, exc: ConversationBusyError) -> JSONResponse:
+        return _error(409, "CONVERSATION_BUSY", str(exc))
+
+    @app.exception_handler(TimeoutError)
+    async def ai_timeout(request: Request, exc: TimeoutError) -> JSONResponse:
+        return _error(503, "AI_TIMEOUT", "AI request timed out; reload conversation and review Versions before retrying a draft request")
+
     @app.exception_handler(ProviderConfigurationError)
     async def provider_not_configured(
         request: Request, exc: ProviderConfigurationError

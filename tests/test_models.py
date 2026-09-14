@@ -15,6 +15,10 @@ from school_ai.database.models import (
 
 def test_all_domain_tables_are_created(session: Session) -> None:
     assert set(inspect(session.bind).get_table_names()) == {
+        "ai_conversations",
+        "ai_conversation_turns",
+        "policy_documents",
+        "policy_chunks",
         "activities",
         "room_availability",
         "rooms",

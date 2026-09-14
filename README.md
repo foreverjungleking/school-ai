@@ -14,7 +14,7 @@ The current implementation provides:
   room suitability
 - Application services and focused repositories that translate persisted school
   data into solver DTOs and persist successful results as versioned schedules
-- pytest coverage using an in-memory SQLite database
+- pytest coverage with SQLite and opt-in PostgreSQL context integration tests
 
 The FastAPI application exposes read-only school data, the complete schedule
 draft/version/publication workflow, and a controlled AI harness over an
@@ -159,7 +159,8 @@ these MCP tools:
 - `list_teachers`, `list_rooms`, `list_student_groups`, `list_activities`
 - `get_current_demo_schedule`, `get_schedule`, `get_schedule_version`,
   `get_published_schedule`
-- `compare_schedule_versions`
+- `compare_schedule_versions`, `get_schedule_lessons`
+- `search_school_policies` (versioned synthetic policy excerpts)
 - `create_schedule_draft`
 
 The MCP adapter delegates to existing application services. It contains no
@@ -263,8 +264,44 @@ generation accepts an optional schedule ID and always obtains candidate slots
 from the scheduling service. Ollama uses native tools first and falls back to a
 strict Pydantic-validated JSON response schema; malformed JSON fails safely.
 The UI limits message length and disables duplicate submission while a request
-is running. These are usability controls, not security controls. There is no
-user authentication, per-user session ownership, persistent conversation
-memory, server-side AI rate limiting, streaming, RAG, autonomous publication,
-or multi-agent orchestration yet. Server-side rate limiting and session
-isolation are required before broad public AI exposure.
+is running. These are usability controls, not security controls. Owned browser
+conversations, PostgreSQL history, bounded memory summaries,
+and lexical policy RAG are now implemented. There is no account authentication,
+per-user schedule ownership, server-side AI rate limiting, streaming,
+autonomous publication, or multi-agent orchestration. Conversation ownership
+protects history; the demo timetable remains shared. Rate limiting and schedule
+isolation are still required before broad public exposure.
+
+## Expanded weekly demo and AI context
+
+The synthetic curriculum now has 100 weekly lessons across four classes,
+with lunch protected by teacher/room availability. CP-SAT keeps its hard
+constraints and additionally minimizes daily workload imbalance and repeated
+same-subject lessons within a day. See [the demo scenario](demo_data/README.md).
+
+After deploying this revision, an existing known synthetic demo can be expanded
+explicitly without removing saved timetable versions:
+
+```bash
+railway ssh --service Backend -- env PYTHONPATH=src python -m school_ai.demo_seed --expand
+```
+
+Then generate and review a new draft in the UI. Existing published lessons do
+not change automatically. The normal seed command still preserves existing
+data; expansion updates the synthetic master data and availability explicitly.
+
+The AI Assistant now saves conversations, compresses older context, and retrieves
+versioned policy excerpts with expandable sources. After migrations, ingest the
+synthetic policy documents explicitly from the backend repository root:
+
+```bash
+railway ssh --service Backend -- env PYTHONPATH=src python -m school_ai.policy_seed demo_data/policies
+```
+
+Try “Remember my class is Year 7 Aurora”, then “What is the lunch policy?” and
+“Which class did I mention?”. Reload to restore history; **Clear conversation**
+erases that conversation's messages and summary. After more than three complete
+exchanges, older turns are summarized through the configured LLM provider.
+
+See [AI context and RAG](docs/ai-context-plan.md) for API contracts, context
+budgets, failure behavior, PostgreSQL tests, and the local Ollama smoke test.

@@ -1,11 +1,21 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { aiApi, ApiError } from "../api/client";
-import type { AIChatResponse } from "../types";
+import type { AIChatResponse, ConversationCredential } from "../types";
 
 const MAX_MESSAGE_LENGTH = 1000;
+const CONVERSATION_KEY = "school-ai-conversation";
+
+function savedConversation(): ConversationCredential | null {
+  try {
+    const value = JSON.parse(localStorage.getItem(CONVERSATION_KEY) ?? "null");
+    return value && typeof value.id === "string" && typeof value.access_token === "string" ? value : null;
+  } catch { return null; }
+}
+
 const examples = [
   "What can you help me with?",
   "List the teachers.",
+  "What is the lunch policy?",
   "Show me the current published schedule.",
   "Generate a new draft.",
   "Compare the newest draft with the published schedule.",
@@ -38,17 +48,67 @@ export function AIAssistant({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const nextId = useRef(1);
+  const credential = useRef<ConversationCredential | null>(savedConversation());
+  const busy = useRef(false);
+  const [loading, setLoading] = useState(Boolean(credential.current));
+  const [compressed, setCompressed] = useState(false);
+  const [earlierTurns, setEarlierTurns] = useState(0);
+
+  useEffect(() => {
+    const saved = credential.current;
+    if (!saved) return;
+    let cancelled = false;
+    aiApi.conversation(saved).then((history) => {
+      if (cancelled) return;
+      setEntries(history.turns.flatMap((turn): ChatEntry[] => [
+        { id: nextId.current++, role: "user", text: turn.user_text },
+        { id: nextId.current++, role: "assistant", text: turn.response.assistant_text, response: turn.response },
+      ]));
+      setCompressed(history.memory_compressed);
+      setEarlierTurns(history.earlier_turns);
+    }).catch((failure) => {
+      if (cancelled) return;
+      if (failure instanceof ApiError && failure.status === 404) {
+        credential.current = null;
+        try { localStorage.removeItem(CONVERSATION_KEY); } catch { /* Storage may be unavailable. */ }
+      }
+      setError("Saved conversation could not be restored. " + unavailableMessage(failure));
+    }).finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const clearConversation = async () => {
+    if (busy.current || loading) return;
+    busy.current = true;
+    setSending(true);
+    setError(null);
+    try {
+      if (credential.current) await aiApi.resetConversation(credential.current);
+      setEntries([]);
+      setCompressed(false);
+      setEarlierTurns(0);
+      setMessage("");
+    } catch (failure) { setError(unavailableMessage(failure)); }
+    finally { busy.current = false; setSending(false); }
+  };
 
   const send = async (event?: FormEvent) => {
     event?.preventDefault();
     const text = message.trim();
-    if (!text || sending) return;
+    if (!text || busy.current || loading) return;
+    busy.current = true;
     setSending(true);
     setError(null);
     setMessage("");
     setEntries((current) => [...current, { id: nextId.current++, role: "user", text }]);
     try {
-      const response = await aiApi.chat({ message: text });
+      if (!credential.current) {
+        credential.current = await aiApi.createConversation();
+        try { localStorage.setItem(CONVERSATION_KEY, JSON.stringify(credential.current)); }
+        catch { setError("This browser cannot save conversation access. History will be available only while this page stays open."); }
+      }
+      const response = await aiApi.chat({ message: text, conversation_id: credential.current.id }, credential.current.access_token);
+      setCompressed(Boolean(response.metadata.memory_compressed));
       setEntries((current) => [
         ...current,
         { id: nextId.current++, role: "assistant", text: response.assistant_text, response },
@@ -67,6 +127,7 @@ export function AIAssistant({
     } catch (requestError) {
       setError(unavailableMessage(requestError));
     } finally {
+      busy.current = false;
       setSending(false);
     }
   };
@@ -79,11 +140,18 @@ export function AIAssistant({
           <h1>AI Assistant</h1>
           <p>Ask about school data and schedules, or request a CP-SAT-backed draft. Publishing always stays in the normal review workflow.</p>
         </div>
-        <span className="assistant-safety">Cannot publish schedules</span>
+        <div className="assistant-controls">
+          <span className="assistant-safety">Cannot publish schedules</span>
+          <button className="secondary-action" disabled={sending || loading} onClick={() => void clearConversation()}>Clear conversation</button>
+        </div>
       </header>
 
       <div className="assistant-layout">
         <div className="panel chat-panel">
+          <div className="conversation-status">
+            {loading ? "Restoring conversation…" : compressed ? "Earlier messages summarized for context." : "Conversation history is saved for this browser."}
+            {earlierTurns > 0 && <span> Showing the latest 50 exchanges.</span>}
+          </div>
           <div className="chat-log" aria-live="polite">
             {entries.length === 0 && (
               <div className="assistant-welcome">
@@ -108,6 +176,19 @@ export function AIAssistant({
                     </ul>
                   </div>
                 )}
+                {entry.role === "assistant" && Boolean(entry.response.metadata.sources?.length) && (
+                  <div className="policy-sources">
+                    <strong>Policy sources consulted</strong>
+                    {entry.response.metadata.sources?.map((source) => (
+                      <details key={source.citation_id}>
+                        <summary>{source.title} · {source.section}</summary>
+                        <small>[{source.citation_id}] · {source.source} · version {source.version.slice(0, 12)}</small>
+                        <p>{source.excerpt}</p>
+                      </details>
+                    ))}
+                  </div>
+                )}
+                {entry.role === "assistant" && entry.response.metadata.compression_failed && <small>Earlier context could not be summarized for this reply. Your saved messages are intact.</small>}
                 {entry.role === "assistant" && entry.response.metadata.draft_created && (
                   <div className="draft-review">
                     <span>Draft ready{entry.response.metadata.solver_status && ` · ${entry.response.metadata.solver_status}`}</span>
@@ -121,10 +202,10 @@ export function AIAssistant({
           {error && <div className="assistant-error" role="alert">{error}</div>}
           <form className="chat-composer" onSubmit={(event) => void send(event)}>
             <label htmlFor="assistant-message">Message</label>
-            <textarea id="assistant-message" value={message} maxLength={MAX_MESSAGE_LENGTH} disabled={sending} onChange={(event) => setMessage(event.target.value)} placeholder="Ask about teachers, schedules, or create a draft…" rows={3} />
+            <textarea id="assistant-message" value={message} maxLength={MAX_MESSAGE_LENGTH} disabled={sending || loading} onChange={(event) => setMessage(event.target.value)} placeholder="Ask about policies, teachers, schedules, or create a draft…" rows={3} />
             <div>
               <small>{message.length}/{MAX_MESSAGE_LENGTH}</small>
-              <button className="primary-action" disabled={sending || !message.trim()} type="submit">{sending ? "Sending…" : "Send"}</button>
+              <button className="primary-action" disabled={sending || loading || !message.trim()} type="submit">{sending ? "Sending…" : "Send"}</button>
             </div>
           </form>
         </div>
@@ -132,7 +213,7 @@ export function AIAssistant({
         <aside className="panel prompt-panel">
           <div className="panel-heading"><div><h2>Try asking</h2><p>Examples use the current demo schedule automatically.</p></div></div>
           <div className="example-prompts">
-            {examples.map((prompt) => <button disabled={sending} key={prompt} onClick={() => setMessage(prompt)}>{prompt}</button>)}
+            {examples.map((prompt) => <button disabled={sending || loading} key={prompt} onClick={() => setMessage(prompt)}>{prompt}</button>)}
           </div>
           <div className="assistant-note"><strong>Review before publishing</strong><p>The assistant can create drafts, but only you can publish from Versions.</p></div>
         </aside>

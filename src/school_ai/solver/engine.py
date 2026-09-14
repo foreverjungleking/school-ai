@@ -65,60 +65,64 @@ def _allowed_by_availability(
 
 
 def solve(problem: SchedulingProblem) -> SolverResult:
-    """Build and solve a timetable using only hard CP-SAT constraints."""
+    """Enforce hard constraints and prefer evenly distributed teaching days."""
 
     model = cp_model.CpModel()
     teachers = {teacher.id: teacher for teacher in problem.teachers}
     groups = {group.id: group for group in problem.student_groups}
 
-    choices: dict[tuple[int, int], list[cp_model.IntVar]] = defaultdict(list)
+    choices: dict[int, list[cp_model.IntVar]] = defaultdict(list)
     candidate_data: dict[
-        tuple[int, int, int, int], tuple[cp_model.IntVar, ActivityInput, TimeSlot]
+        tuple[int, int, int], tuple[cp_model.IntVar, ActivityInput, TimeSlot]
     ] = {}
     teacher_intervals: dict[int, list[cp_model.IntervalVar]] = defaultdict(list)
     group_intervals: dict[int, list[cp_model.IntervalVar]] = defaultdict(list)
     room_intervals: dict[int, list[cp_model.IntervalVar]] = defaultdict(list)
+    group_days = defaultdict(list)
+    activity_days = defaultdict(list)
 
     for activity in problem.activities:
         teacher = teachers[activity.teacher_id]
         group = groups[activity.student_group_id]
-        for session_index in range(activity.sessions_per_week):
-            session_key = (activity.id, session_index)
-            for slot in problem.time_slots:
-                start_minute = _minute_of_day(slot.start_time)
-                end_minute = start_minute + activity.duration_minutes
-                if not _fits_slot(activity, slot) or not _allowed_by_availability(
-                    teacher.availability, slot.weekday, start_minute, end_minute
+        for slot in problem.time_slots:
+            start_minute = _minute_of_day(slot.start_time)
+            end_minute = start_minute + activity.duration_minutes
+            if not _fits_slot(activity, slot) or not _allowed_by_availability(
+                teacher.availability, slot.weekday, start_minute, end_minute
+            ):
+                continue
+
+            for room in problem.rooms:
+                if room.capacity < group.size:
+                    continue
+                if room.room_type != activity.required_room_type:
+                    continue
+                if not _allowed_by_availability(
+                    room.availability, slot.weekday, start_minute, end_minute
                 ):
                     continue
 
-                for room in problem.rooms:
-                    if room.capacity < group.size:
-                        continue
-                    if room.room_type != activity.required_room_type:
-                        continue
-                    if not _allowed_by_availability(
-                        room.availability, slot.weekday, start_minute, end_minute
-                    ):
-                        continue
+                key = (activity.id, slot.id, room.id)
+                selected = model.new_bool_var(
+                    f"assign_a{activity.id}_t{slot.id}_r{room.id}"
+                )
+                interval = model.new_optional_fixed_size_interval_var(
+                    _week_minute(slot.weekday, slot.start_time),
+                    activity.duration_minutes,
+                    selected,
+                    f"interval_a{activity.id}_t{slot.id}_r{room.id}",
+                )
+                choices[activity.id].append(selected)
+                candidate_data[key] = (selected, activity, slot)
+                teacher_intervals[activity.teacher_id].append(interval)
+                group_intervals[activity.student_group_id].append(interval)
+                room_intervals[room.id].append(interval)
+                group_days[activity.student_group_id, slot.weekday].append(
+                    selected * activity.duration_minutes
+                )
+                activity_days[activity.id, slot.weekday].append(selected)
 
-                    key = (activity.id, session_index, slot.id, room.id)
-                    selected = model.new_bool_var(
-                        f"assign_a{activity.id}_s{session_index}_t{slot.id}_r{room.id}"
-                    )
-                    interval = model.new_optional_fixed_size_interval_var(
-                        _week_minute(slot.weekday, slot.start_time),
-                        activity.duration_minutes,
-                        selected,
-                        f"interval_a{activity.id}_s{session_index}_t{slot.id}_r{room.id}",
-                    )
-                    choices[session_key].append(selected)
-                    candidate_data[key] = (selected, activity, slot)
-                    teacher_intervals[activity.teacher_id].append(interval)
-                    group_intervals[activity.student_group_id].append(interval)
-                    room_intervals[room.id].append(interval)
-
-            model.add_exactly_one(choices[session_key])
+        model.add(sum(choices[activity.id]) == activity.sessions_per_week)
 
     for intervals in teacher_intervals.values():
         model.add_no_overlap(intervals)
@@ -126,6 +130,35 @@ def solve(problem: SchedulingProblem) -> SolverResult:
         model.add_no_overlap(intervals)
     for intervals in room_intervals.values():
         model.add_no_overlap(intervals)
+
+    weekdays = sorted({slot.weekday for slot in problem.time_slots})
+    penalties = []
+    for group_id in groups:
+        total = sum(
+            activity.sessions_per_week * activity.duration_minutes
+            for activity in problem.activities
+            if activity.student_group_id == group_id
+        )
+        loads = []
+        for day in weekdays:
+            load = model.new_int_var(0, total, f"load_g{group_id}_d{day}")
+            model.add(load == sum(group_days[group_id, day]))
+            loads.append(load)
+        highest = model.new_int_var(0, total, f"highest_g{group_id}")
+        lowest = model.new_int_var(0, total, f"lowest_g{group_id}")
+        model.add_max_equality(highest, loads)
+        model.add_min_equality(lowest, loads)
+        penalties.append(highest - lowest)
+    for activity in problem.activities:
+        for day in weekdays:
+            repeats = model.new_int_var(
+                0, activity.sessions_per_week, f"repeats_a{activity.id}_d{day}"
+            )
+            model.add_max_equality(
+                repeats, [0, sum(activity_days[activity.id, day]) - 1]
+            )
+            penalties.append(repeats * activity.duration_minutes)
+    model.minimize(sum(penalties))
 
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = problem.max_solve_seconds
@@ -141,7 +174,7 @@ def solve(problem: SchedulingProblem) -> SolverResult:
 
     assignments: list[Assignment] = []
     if status in (SolveStatus.OPTIMAL, SolveStatus.FEASIBLE):
-        for (activity_id, session_index, slot_id, room_id), (
+        for (activity_id, slot_id, room_id), (
             selected,
             activity,
             slot,
@@ -150,7 +183,7 @@ def solve(problem: SchedulingProblem) -> SolverResult:
                 assignments.append(
                     Assignment(
                         activity_id=activity_id,
-                        session_index=session_index,
+                        session_index=0,
                         teacher_id=activity.teacher_id,
                         student_group_id=activity.student_group_id,
                         room_id=room_id,
@@ -169,13 +202,34 @@ def solve(problem: SchedulingProblem) -> SolverResult:
             )
         )
 
+        # Session identities follow chronological order, without multiplying
+        # candidate variables by every interchangeable session number.
+        session_counts: dict[int, int] = defaultdict(int)
+        numbered = []
+        for assignment in assignments:
+            numbered.append(assignment.model_copy(update={
+                "session_index": session_counts[assignment.activity_id]
+            }))
+            session_counts[assignment.activity_id] += 1
+        assignments = numbered
+
     return SolverResult(
         status=status,
         assignments=tuple(assignments),
         solve_duration_seconds=solver.wall_time,
-        objective_value=None,
+        objective_value=(
+            solver.objective_value
+            if status in (SolveStatus.OPTIMAL, SolveStatus.FEASIBLE)
+            else None
+        ),
         metadata={
             "candidate_count": len(candidate_data),
+            "objective": "daily_load_range_minutes_plus_repeated_subject_minutes",
+            "objective_value": (
+                solver.objective_value
+                if status in (SolveStatus.OPTIMAL, SolveStatus.FEASIBLE)
+                else None
+            ),
             "conflicts": solver.num_conflicts,
             "branches": solver.num_branches,
             "solver_status": solver.status_name(raw_status),

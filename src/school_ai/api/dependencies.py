@@ -14,6 +14,8 @@ from school_ai.repositories import (
     SchedulingDataRepository,
 )
 from school_ai.services import SchoolDataService, SchedulingService
+from school_ai.services.conversations import ConversationService
+from school_ai.services.policies import PolicyService
 
 
 def get_session(request: Request) -> Generator[Session, None, None]:
@@ -38,9 +40,21 @@ def get_scheduling_service(
     )
 
 
+def get_conversation_service(request: Request) -> ConversationService:
+    return ConversationService(request.app.state.session_factory, request.app.state.settings.ai_context)
+
+
+def get_policy_service(request: Request) -> PolicyService:
+    return PolicyService(request.app.state.session_factory)
+
+
 def get_ai_harness(
+    request: Request,
+    session: Session = Depends(get_session),
+    policies: PolicyService = Depends(get_policy_service),
     school_data: SchoolDataService = Depends(get_school_data_service),
     scheduling: SchedulingService = Depends(get_scheduling_service),
 ) -> AIHarness:
-    server = SchoolMCPServer(school_data, scheduling)
-    return AIHarness(create_provider(), InProcessMCPClient(server))
+    server = SchoolMCPServer(school_data, scheduling, policies)
+    return AIHarness(create_provider(), InProcessMCPClient(server, after_tool=session.close),
+                     context_settings=request.app.state.settings.ai_context)

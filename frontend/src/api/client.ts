@@ -2,6 +2,8 @@ import type {
   Activity,
   AIChatRequest,
   AIChatResponse,
+  ConversationCredential,
+  ConversationHistory,
   GenerateDraftResult,
   Room,
   Schedule,
@@ -84,9 +86,19 @@ export const schedulesApi = {
 };
 
 export const aiApi = {
-  chat: (payload: AIChatRequest) =>
+  createConversation: () => request<ConversationCredential>("/ai/conversations", { method: "POST" }),
+  conversation: (credential: ConversationCredential) =>
+    request<ConversationHistory>(`/ai/conversations/${credential.id}`, {
+      headers: { "X-Conversation-Token": credential.access_token },
+    }),
+  resetConversation: (credential: ConversationCredential) =>
+    request<{ cleared: boolean }>(`/ai/conversations/${credential.id}/reset`, {
+      method: "POST", headers: { "X-Conversation-Token": credential.access_token },
+    }),
+  chat: (payload: AIChatRequest, token?: string) =>
     request<AIChatResponse>("/ai/chat", {
       method: "POST",
+      headers: token ? { "X-Conversation-Token": token } : {},
       body: JSON.stringify(payload),
     }),
 };

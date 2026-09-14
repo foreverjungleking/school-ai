@@ -196,3 +196,43 @@ Follow Railway's current [custom-domain flow](https://docs.railway.com/networkin
 
 Railway/DNS configuration and this live smoke test are manual; repository tests
 require no Railway credentials.
+
+## Deploy the weekly demo, policy RAG, and memory update
+
+Deploy the backend and frontend revisions together. The existing pre-deploy
+`alembic upgrade head` adds conversation and policy tables without altering old
+school records or timetable versions. Keep the configured LLM provider and
+credentials on the backend. No new service or embedding provider is required.
+
+Once the new backend deployment is healthy, run these explicit one-off commands
+from its repository root. `PYTHONPATH=src` supports the source-layout runtime
+where Railway installs dependencies from `requirements.txt` and Uvicorn uses
+`--app-dir src`:
+
+```bash
+railway ssh --service Backend -- env PYTHONPATH=src python -m school_ai.demo_seed --expand
+railway ssh --service Backend -- env PYTHONPATH=src python -m school_ai.policy_seed demo_data/policies
+```
+
+Expansion updates the known synthetic curriculum and resource availability,
+while retaining all old lesson snapshots. Generate, review and publish a new
+draft to see the expanded week. Policy ingestion is idempotent per document;
+rerun it explicitly after policy edits. Include `/demo_data/policies/**` in
+Backend watch paths when configuring watches in the dashboard.
+
+Optional backend settings are `AI_CONTEXT_MAX_BYTES=48000`,
+`AI_SUMMARY_MAX_BYTES=4000`, and `AI_RECENT_TURNS=3`. These bound model context,
+not the total database history. Saved exchanges remain until the user clears
+the conversation. The original stateless `/ai/chat` request remains supported.
+
+Smoke-test the deployed UI:
+
+1. Generate a new timetable draft and check lessons across all five weekdays.
+2. Ask the assistant to remember a synthetic class name, then ask a follow-up.
+3. Ask “What is the lunch policy?” and expand the displayed source/version.
+4. Continue beyond four exchanges; confirm earlier context is summarized and
+   the remembered class remains available.
+5. Reload the page and confirm the saved conversation returns.
+6. Clear the conversation and reload to confirm history is erased.
+7. In another browser profile, verify that the first profile's conversation
+   history is not available. Timetables remain shared synthetic demo data.

@@ -16,6 +16,7 @@ from sqlalchemy import (
     Index,
     String,
     Time,
+    Text,
     UniqueConstraint,
     func,
     text,
@@ -258,3 +259,55 @@ class ScheduledLesson(Base):
     teacher: Mapped[Teacher] = relationship()
     student_group: Mapped[StudentGroup] = relationship()
     room: Mapped[Room] = relationship()
+
+
+class AIConversation(Base):
+    __tablename__ = "ai_conversations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    revision: Mapped[int] = mapped_column(nullable=False, default=0)
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    summary_through: Mapped[int] = mapped_column(nullable=False, default=0)
+    lease_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AIConversationTurn(Base):
+    __tablename__ = "ai_conversation_turns"
+    __table_args__ = (
+        UniqueConstraint("conversation_id", "sequence", name="uq_ai_conversation_sequence"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(
+        ForeignKey("ai_conversations.id", ondelete="CASCADE"), index=True
+    )
+    sequence: Mapped[int] = mapped_column(nullable=False)
+    user_text: Mapped[str] = mapped_column(Text, nullable=False)
+    response: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PolicyDocument(Base):
+    __tablename__ = "policy_documents"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
+    current_version: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class PolicyChunk(Base):
+    __tablename__ = "policy_chunks"
+    __table_args__ = (
+        UniqueConstraint("document_id", "version", "ordinal", name="uq_policy_chunk_version"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    document_id: Mapped[int] = mapped_column(ForeignKey("policy_documents.id"), index=True)
+    version: Mapped[str] = mapped_column(String(64), nullable=False)
+    ordinal: Mapped[int] = mapped_column(nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    section: Mapped[str] = mapped_column(String(200), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)

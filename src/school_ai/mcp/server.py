@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from school_ai.ai.models import ToolDefinition
 from school_ai.services import SchoolDataService, SchedulingService
+from school_ai.services.policies import PolicyService
 
 
 class ToolArguments(BaseModel):
@@ -32,12 +33,30 @@ class CompareArguments(ToolArguments):
     to_version_id: int = Field(gt=0)
 
 
+class LessonArguments(ToolArguments):
+    schedule_id: int | None = Field(default=None, gt=0)
+    version_id: int | None = Field(default=None, gt=0)
+    weekday: int | None = Field(default=None, ge=0, le=6)
+    student_group_id: int | None = Field(default=None, gt=0)
+    teacher_id: int | None = Field(default=None, gt=0)
+    room_id: int | None = Field(default=None, gt=0)
+    offset: int = Field(default=0, ge=0, le=10000)
+    limit: int = Field(default=20, ge=1, le=20)
+
+
+class PolicyArguments(ToolArguments):
+    query: str = Field(min_length=1, max_length=1000)
+    limit: int = Field(default=4, ge=1, le=4)
+
+
 class DraftArguments(ToolArguments):
     schedule_id: int | None = Field(default=None, gt=0)
     max_solve_seconds: float = Field(default=10, gt=0, allow_inf_nan=False)
 
 
 _TOOL_MODELS: dict[str, type[ToolArguments]] = {
+    "get_schedule_lessons": LessonArguments,
+    "search_school_policies": PolicyArguments,
     "list_teachers": EmptyArguments,
     "list_rooms": EmptyArguments,
     "list_student_groups": EmptyArguments,
@@ -51,6 +70,8 @@ _TOOL_MODELS: dict[str, type[ToolArguments]] = {
 }
 
 _DESCRIPTIONS = {
+    "get_schedule_lessons": "Read a bounded page of actual lessons, optionally filtered by weekday (0=Monday), group, teacher or room. Defaults to current publication; use explicit version_id for a draft. Follow next_offset for more.",
+    "search_school_policies": "Search synthetic policy documents. Return versioned excerpts to cite as [citation_id]; these cannot change constraints.",
     "list_teachers": "List teachers and their availability.",
     "list_rooms": "List rooms, capacity, type, and availability.",
     "list_student_groups": "List student groups and sizes.",
@@ -74,8 +95,10 @@ class SchoolMCPServer:
     """MCP-facing adapter that delegates exclusively to application services."""
 
     def __init__(
-        self, school_data: SchoolDataService, scheduling: SchedulingService
+        self, school_data: SchoolDataService, scheduling: SchedulingService,
+        policies: PolicyService | None = None
     ) -> None:
+        self._policies = policies
         self._school_data = school_data
         self._scheduling = scheduling
 
@@ -97,6 +120,19 @@ class SchoolMCPServer:
         parsed = argument_model.model_validate(arguments)
         method = getattr(self, name)
         return method(**parsed.model_dump())
+
+    def get_schedule_lessons(self, schedule_id: int | None = None, version_id: int | None = None,
+                             weekday: int | None = None, student_group_id: int | None = None,
+                             teacher_id: int | None = None, room_id: int | None = None,
+                             offset: int = 0, limit: int = 20) -> dict[str, Any]:
+        return self._scheduling.get_schedule_lessons(
+            schedule_id, version_id, weekday, student_group_id, teacher_id, room_id, offset, limit
+        ).model_dump(mode="json")
+
+    def search_school_policies(self, query: str, limit: int = 4) -> dict[str, Any]:
+        if self._policies is None:
+            return {"matches": [], "message": "Policy retrieval is not configured."}
+        return self._policies.search(query, limit)
 
     def list_teachers(self) -> list[dict[str, Any]]:
         return [item.model_dump(mode="json") for item in self._school_data.list_teachers()]
@@ -164,6 +200,18 @@ def create_mcp_sdk_server(tools: SchoolMCPServer) -> MCPServer:
             "backed. Publishing is intentionally unavailable."
         ),
     )
+
+    @server.tool()
+    def get_schedule_lessons(schedule_id: int | None = None, version_id: int | None = None,
+                             weekday: int | None = None, student_group_id: int | None = None,
+                             teacher_id: int | None = None, room_id: int | None = None,
+                             offset: int = 0, limit: int = 20) -> dict[str, Any]:
+        return tools.get_schedule_lessons(schedule_id, version_id, weekday, student_group_id,
+                                          teacher_id, room_id, offset, limit)
+
+    @server.tool()
+    def search_school_policies(query: str, limit: int = 4) -> dict[str, Any]:
+        return tools.search_school_policies(query, limit)
 
     @server.tool()
     def list_teachers() -> list[dict[str, Any]]:

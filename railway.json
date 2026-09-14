@@ -4,6 +4,7 @@
     "builder": "RAILPACK",
     "watchPatterns": [
       "/src/**",
+      "/demo_data/policies/**",
       "/migrations/**",
       "/alembic.ini",
       "/pyproject.toml",
